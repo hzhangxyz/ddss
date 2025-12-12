@@ -293,9 +293,9 @@ class ClusterNode {
                 callback(null, {
                     metadata: {
                         id: this.id,
-                        kind: EngineKind.EAGER, // 积极模式
-                        input: ["`x"], // 输入模式
-                        output: ["`x"], // 输出模式
+                        kind: EngineKind.EAGER,
+                        input: ["`x"],
+                        output: ["`x"],
                     },
                 });
             },
@@ -325,7 +325,6 @@ class ClusterNode {
                 callback(null, { data: this.engine.getData() });
             },
         } as EngineServer);
-        // 绑定服务器到指定地址
         const bindAsync = promisify<string, grpc.ServerCredentials, number>(this.server.bindAsync).bind(this.server);
         const port = await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
         this.addr = `${this.addr.split(":")[0]}:${port}`;
