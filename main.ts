@@ -82,11 +82,12 @@ class Search extends Search_ {
      * @param {function} callback - 处理搜索结果的回调函数
      * @returns {*} - 搜索执行结果
      */
-    output(callback: (result: string) => boolean): number {
+    output(callback: (result: string) => void): number {
         return super.execute((candidate: Rule) => {
             const result = unparse(candidate.toString());
             this.data.add(result);
-            return callback(result);
+            callback(result);
+            return false;
         });
     }
 
@@ -135,7 +136,6 @@ class ClusterNode {
             this.engine.output((result: string) => {
                 data.push(result);
                 console.log(`Found data: ${result}`);
-                return false;
             });
             if (data.length > 0) {
                 for (const id of this.nodes.keys()) {
