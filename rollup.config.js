@@ -9,6 +9,7 @@ export default {
     output: {
         file: "dist/main.js",
         format: "es",
+        banner: "#!/usr/bin/env node",
     },
     plugins: [
         resolve(),
