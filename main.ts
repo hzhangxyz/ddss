@@ -378,8 +378,8 @@ class ClusterNode {
                 const dataResponse = await pullAsync({});
                 if (dataResponse.data) {
                     for (const item of dataResponse.data) {
-                        console.log(`Receiving data: ${item}`);
                         this.engine.input(item);
+                        console.log(`Receiving data: ${item}`);
                     }
                 }
                 console.log(`Joining node ${node.id} at ${node.addr}`);
@@ -398,9 +398,9 @@ class ClusterNode {
                     node.client.cluster,
                 );
                 await leaveAsync({ node: { id: this.id, addr: this.addr } });
-                console.log(`Leaving node ${node.id} at ${node.addr}`);
                 node.client.cluster.close();
                 node.client.engine.close();
+                console.log(`Leaving node ${node.id} at ${node.addr}`);
             }
         }
     }
