@@ -25,12 +25,15 @@ import {
     type JoinResponse,
     type LeaveRequest,
     type LeaveResponse,
+    type ListRequest,
+    type ListResponse,
     type MetaDataRequest,
     type MetaDataResponse,
     type PushDataRequest,
     type PushDataResponse,
     type PullDataRequest,
     type PullDataResponse,
+    type Node,
     EngineKind,
     ClusterClient,
     type ClusterServer,
@@ -252,7 +255,7 @@ class ClusterNode {
         this.server.addService(ClusterService, {
             /**
              * 处理节点加入请求
-             * 将请求节点加入本地节点列表，并返回当前所有节点信息
+             * 将请求节点加入本地节点列表
              */
             join: async (
                 call: grpc.ServerUnaryCall<JoinRequest, JoinResponse>,
@@ -264,11 +267,7 @@ class ClusterNode {
                     this.nodes.set(id, this.nodeInfo(id, addr));
                     console.log(`Joined with node ${id} at ${addr}`);
                 }
-                const nodes = Array.from(this.nodes.values()).map((n) => ({
-                    id: n.id,
-                    addr: n.addr,
-                }));
-                callback(null, { nodes });
+                callback(null, {});
             },
             /**
              * 处理节点离开请求
@@ -285,6 +284,20 @@ class ClusterNode {
                     console.log(`Left node ${id} at ${addr}`);
                 }
                 callback(null, {});
+            },
+            /**
+             * 处理节点列表请求
+             * 返回当前集群中所有节点的列表
+             */
+            list: async (
+                call: grpc.ServerUnaryCall<ListRequest, ListResponse>,
+                callback: grpc.sendUnaryData<ListResponse>,
+            ) => {
+                const nodes = Array.from(this.nodes.values()).map((n) => ({
+                    id: n.id,
+                    addr: n.addr,
+                }));
+                callback(null, { nodes });
             },
         } as ClusterServer);
         // 注册引擎服务
@@ -351,18 +364,27 @@ class ClusterNode {
         return this;
     }
     /**
-     * 加入现有集群
-     * @param {string} addr - 要加入的集群中某个节点的地址
+     * 获取节点列表
+     * @param {string} addr - 要查询的节点地址
+     * @returns {Promise<Node[]>} 节点列表
      */
-    async join(addr: string): Promise<void> {
+    async list(addr: string): Promise<Node[]> {
         // 创建目标节点的集群服务客户端
         const client = new ClusterClient(addr, grpc.credentials.createInsecure());
-        const joinAsync = promisify<JoinRequest, JoinResponse>(client.join).bind(client);
-        // 向目标节点发送加入请求
-        const response = await joinAsync({ node: { id: this.id, addr: this.addr } });
-        // 遍历集群中的所有节点
+        const listAsync = promisify<ListRequest, ListResponse>(client.list).bind(client);
+        // 向目标节点发送列表请求
+        const response = await listAsync({});
+        console.log(`Retrieved ${response.nodes.length} nodes from ${addr}`);
+        return response.nodes;
+    }
+    /**
+     * 加入现有集群
+     * @param {Node[]} nodes - 要加入的节点列表
+     */
+    async join(nodes: Node[]): Promise<void> {
+        // 遍历所有节点
         const localData = this.engine.getData();
-        for (const node of response.nodes) {
+        for (const node of nodes) {
             if (!this.nodes.has(node.id)) {
                 // 创建节点信息并保存
                 const nodeInfo = this.nodeInfo(node.id, node.addr);
@@ -446,7 +468,7 @@ if (process.argv.length === 4) {
     console.log(`Starting node at ${listenAddr} and joining ${joinAddr}`);
     const node = new ClusterNode(listenAddr);
     await node.listen(); // 启动服务监听
-    await node.join(joinAddr); // 加入集群
+    await node.join(await node.list(joinAddr)); // 加入集群
 }
 
 // 场景二: 创建新集群
