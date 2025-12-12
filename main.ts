@@ -33,10 +33,10 @@ import {
     type PullDataResponse,
     EngineKind,
     ClusterClient,
-    ClusterServer,
+    type ClusterServer,
     ClusterService,
     EngineClient,
-    EngineServer,
+    type EngineServer,
     EngineService,
 } from "./ddss.js";
 
@@ -100,7 +100,7 @@ class Search extends Search_ {
      * @returns {Array<string>} - 数据数组
      */
     getData(): string[] {
-        return [...this.data];
+        return Array.from(this.data);
     }
 }
 
@@ -243,7 +243,7 @@ class ClusterNode {
                     this.nodes.set(id, this.nodeInfo(id, addr));
                     console.log(`Joined with node ${id} at ${addr}`);
                 }
-                const nodes = [...this.nodes.values()].map((n) => ({
+                const nodes = Array.from(this.nodes.values()).map((n) => ({
                     id: n.id,
                     addr: n.addr,
                 }));
@@ -267,7 +267,7 @@ class ClusterNode {
                 }
                 callback(null, {});
             },
-        });
+        } as ClusterServer);
         // 注册引擎服务
         this.server.addService(EngineService, {
             /**
@@ -297,8 +297,8 @@ class ClusterNode {
             ) => {
                 const data = call.request.data!;
                 for (const item of data) {
-                    console.log(`Received data: ${item}`);
                     this.engine.input(item);
+                    console.log(`Received data: ${item}`);
                 }
                 callback(null, {});
             },
@@ -314,7 +314,7 @@ class ClusterNode {
                     data: this.engine.getData(),
                 });
             },
-        });
+        } as EngineServer);
         // 绑定服务器到指定地址
         const bindAsync = promisify<string, grpc.ServerCredentials, number>(this.server.bindAsync).bind(this.server);
         const port = await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
