@@ -142,14 +142,11 @@ class ClusterNode {
                 }
                 for (const id of this.nodes.keys()) {
                     if (id !== this.id) {
-                        const node = this.nodes.get(id);
-                        if (node) {
-                            const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
-                                node.client.engine.pushData,
-                            ).bind(node.client.engine);
-                            await pushDataAsync({ data });
-                            console.log(`Pushed data to node: ${id} (${data.length} items)`);
-                        }
+                        const node = this.nodes.get(id)!;
+                        const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
+                            node.client.engine.pushData,
+                        ).bind(node.client.engine);
+                        await pushDataAsync({ data });
                     }
                 }
             }
@@ -182,14 +179,11 @@ class ClusterNode {
             console.log(`Received input: ${formattedLine}`);
             for (const id of this.nodes.keys()) {
                 if (id !== this.id) {
-                    const node = this.nodes.get(id);
-                    if (node) {
-                        const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
-                            node.client.engine.pushData,
-                        ).bind(node.client.engine);
-                        await pushDataAsync({ data: [formattedLine] });
-                        console.log(`Pushed data to node: ${id} (${formattedLine})`);
-                    }
+                    const node = this.nodes.get(id)!;
+                    const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
+                        node.client.engine.pushData,
+                    ).bind(node.client.engine);
+                    await pushDataAsync({ data: [formattedLine] });
                 }
             }
         });
@@ -248,20 +242,13 @@ class ClusterNode {
                 call: grpc.ServerUnaryCall<JoinRequest, JoinResponse>,
                 callback: grpc.sendUnaryData<JoinResponse>,
             ) => {
-                const node = call.request.node;
-                if (!node) {
-                    callback(new Error("Node information is required"), null);
-                    return;
-                }
+                const node = call.request.node!;
                 const { id, addr } = node;
-                const isNewNode = !this.nodes.has(id);
-                if (isNewNode) {
+                if (!this.nodes.has(id)) {
                     this.nodes.set(id, this.nodeInfo(id, addr));
-                }
-                callback(null, {});
-                if (isNewNode) {
                     console.log(`Joined node: ${id} at ${addr}`);
                 }
+                callback(null, {});
             },
             /**
              * 处理节点离开请求
@@ -271,20 +258,13 @@ class ClusterNode {
                 call: grpc.ServerUnaryCall<LeaveRequest, LeaveResponse>,
                 callback: grpc.sendUnaryData<LeaveResponse>,
             ) => {
-                const node = call.request.node;
-                if (!node) {
-                    callback(new Error("Node information is required"), null);
-                    return;
-                }
+                const node = call.request.node!;
                 const { id, addr } = node;
-                const hadNode = this.nodes.has(id);
-                if (hadNode) {
+                if (this.nodes.has(id)) {
                     this.nodes.delete(id);
-                }
-                callback(null, {});
-                if (hadNode) {
                     console.log(`Left node: ${id} at ${addr}`);
                 }
+                callback(null, {});
             },
             /**
              * 处理节点列表请求
@@ -327,14 +307,12 @@ class ClusterNode {
                 call: grpc.ServerUnaryCall<PushDataRequest, PushDataResponse>,
                 callback: grpc.sendUnaryData<PushDataResponse>,
             ) => {
-                const data = call.request.data;
+                const data = call.request.data!;
                 for (const item of data) {
                     this.engine.input(item);
+                    console.log(`Received data: ${item}`);
                 }
                 callback(null, {});
-                for (const item of data) {
-                    console.log(`Pushed data: ${item}`);
-                }
             },
             /**
              * 处理数据拉取请求
@@ -391,13 +369,11 @@ class ClusterNode {
                     nodeInfo.client.cluster,
                 );
                 await joinAsync({ node: { id: this.id, addr: this.addr } });
-                console.log(`Joined to node: ${node.id} at ${node.addr}`);
                 if (localData.length > 0) {
                     const pushAsync = promisify<PushDataRequest, PushDataResponse>(
                         nodeInfo.client.engine.pushData,
                     ).bind(nodeInfo.client.engine);
                     await pushAsync({ data: localData });
-                    console.log(`Pushed local data to node: ${node.id} (${localData.length} items)`);
                 }
                 const pullAsync = promisify<PullDataRequest, PullDataResponse>(nodeInfo.client.engine.pullData).bind(
                     nodeInfo.client.engine,
@@ -405,10 +381,11 @@ class ClusterNode {
                 const dataResponse = await pullAsync({});
                 if (dataResponse.data) {
                     for (const item of dataResponse.data) {
+                        console.log(`Receiving data: ${item}`);
                         this.engine.input(item);
                     }
-                    console.log(`Pulled data from node: ${node.id} (${dataResponse.data.length} items)`);
                 }
+                console.log(`Joining node ${node.id} at ${node.addr}`);
             }
         }
     }
@@ -419,15 +396,14 @@ class ClusterNode {
     async leave(): Promise<void> {
         for (const id of this.nodes.keys()) {
             if (id !== this.id) {
-                const node = this.nodes.get(id);
-                if (!node) continue;
+                const node = this.nodes.get(id)!;
                 const leaveAsync = promisify<LeaveRequest, LeaveResponse>(node.client.cluster.leave).bind(
                     node.client.cluster,
                 );
                 await leaveAsync({ node: { id: this.id, addr: this.addr } });
+                console.log(`Leaving node ${node.id} at ${node.addr}`);
                 node.client.cluster.close();
                 node.client.engine.close();
-                console.log(`Left from node: ${node.id} at ${node.addr}`);
             }
         }
     }
@@ -478,6 +454,7 @@ if (process.argv.length < 3 || process.argv.length > 4) {
 if (process.argv.length === 4) {
     const listenAddr = addAddressPrefixForPort(process.argv[2], "0.0.0.0");
     const joinAddr = addAddressPrefixForPort(process.argv[3], "127.0.0.1");
+    console.log(`Starting node at ${listenAddr} and joining ${joinAddr}`);
     const node = new ClusterNode(listenAddr);
     await node.listen();
     await node.join(await node.list(joinAddr));
@@ -489,6 +466,7 @@ if (process.argv.length === 4) {
  */
 if (process.argv.length === 3) {
     const listenAddr = addAddressPrefixForPort(process.argv[2], "0.0.0.0");
+    console.log(`Starting node at ${listenAddr}`);
     const node = new ClusterNode(listenAddr);
     await node.listen();
 }
