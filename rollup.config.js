@@ -11,11 +11,5 @@ export default {
         format: "es",
         banner: "#!/usr/bin/env node",
     },
-    plugins: [
-        resolve(),
-        commonjs(),
-        json(),
-        typescript(),
-        terser()
-    ]
+    plugins: [resolve(), commonjs(), json(), typescript(), terser()],
 };
