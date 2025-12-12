@@ -94,7 +94,7 @@ class Search extends Search_ {
         while (hasMore) {
             let resultFound = false;
             let currentResult = "";
-            
+
             super.execute((candidate: Rule) => {
                 const result = unparse(candidate.toString());
                 this.data.add(result);
@@ -103,7 +103,7 @@ class Search extends Search_ {
                 // 返回true停止execute，这样每次只处理一个结果
                 return true;
             });
-            
+
             if (resultFound) {
                 yield currentResult;
             } else {
