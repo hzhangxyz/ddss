@@ -15,6 +15,7 @@
         "build": "run-s proto rollup"
     },
     "devDependencies": {
+        "@biomejs/biome": "^2.3.8",
         "@grpc/grpc-js": "^1.14.3",
         "@rollup/plugin-commonjs": "^29.0.0",
         "@rollup/plugin-json": "^6.1.0",
