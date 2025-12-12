@@ -93,20 +93,23 @@ class Search extends Search_ {
         // 如果有待处理的结果（从上次break留下的），先yield它们
         yield* this.yieldPendingResults();
 
-        // 清空待处理列表并重置索引
-        this.pendingResults = [];
-        this.currentIndex = 0;
+        // 只有当所有待处理结果都已yield后，才清空并执行新搜索
+        if (this.currentIndex >= this.pendingResults.length) {
+            // 清空待处理列表并重置索引
+            this.pendingResults = [];
+            this.currentIndex = 0;
 
-        // 执行新的搜索
-        super.execute((candidate: Rule) => {
-            const result = unparse(candidate.toString());
-            this.data.add(result); // 保存搜索结果到数据集合
-            this.pendingResults.push(result);
-            return false; // 继续搜索收集所有结果
-        });
+            // 执行新的搜索
+            super.execute((candidate: Rule) => {
+                const result = unparse(candidate.toString());
+                this.data.add(result); // 保存搜索结果到数据集合
+                this.pendingResults.push(result);
+                return false; // 继续搜索收集所有结果
+            });
 
-        // Yield新搜索到的结果
-        yield* this.yieldPendingResults();
+            // Yield新搜索到的结果
+            yield* this.yieldPendingResults();
+        }
     }
 
     /**
