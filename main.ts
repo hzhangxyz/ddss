@@ -375,6 +375,8 @@ class ClusterNode {
         // 向目标节点发送列表请求
         const response = await listAsync({});
         console.log(`Retrieved ${response.nodes.length} nodes from ${addr}`);
+        // 关闭客户端连接
+        client.close();
         return response.nodes;
     }
     /**
