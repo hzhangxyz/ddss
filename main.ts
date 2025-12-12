@@ -166,10 +166,10 @@ class ClusterNode {
         setTimeout(loop, 0);
     }
     /**
-     * 设置stdin读取循环
-     * 持续读取标准输入，每收到一行时将其输入到搜索引擎并推送到所有其他节点
+     * 设置IO读取循环与信号处理器
+     * 持续读取标准输入，每收到一行时将其输入到搜索引擎并推送到所有其他节点, 并设置信号处理器
      */
-    private setupStdinLoop(): ReturnType<typeof createInterface> {
+    private setupIoLoop(): void {
         const rl = createInterface({
             input: process.stdin,
             output: process.stdout,
@@ -201,7 +201,32 @@ class ClusterNode {
                 }
             }
         });
-        return rl;
+        // 注册进程终止信号处理器，确保优雅退出
+        process.on("SIGINT", async () => {
+            rl.close(); // 关闭 readline 接口
+            await this.leave(); // 通知其他节点本节点离开
+            process.exit(0);
+        });
+        // 注册 SIGUSR1 信号处理器，打印所有节点信息
+        process.on("SIGUSR1", () => {
+            console.log("=== All Nodes Information ===");
+            for (const [id, nodeInfo] of this.nodes.entries()) {
+                console.log(`Node ID: ${id}`);
+                console.log(`  Address: ${nodeInfo.addr}`);
+            }
+            console.log(`Total nodes: ${this.nodes.size}`);
+            console.log("=============================");
+        });
+        // 注册 SIGUSR2 信号处理器，打印所有数据
+        process.on("SIGUSR2", () => {
+            console.log("=== All Data Managed by Search ===");
+            const data = this.engine.getData();
+            data.forEach((item, index) => {
+                console.log(`[${index + 1}] ${item}`);
+            });
+            console.log(`Total data items: ${data.length}`);
+            console.log("==================================");
+        });
     }
     /**
      * 创建节点信息对象
@@ -320,33 +345,7 @@ class ClusterNode {
         const port = await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
         this.addr = `${this.addr.split(":")[0]}:${port}`;
         this.setupSearchLoop();
-        const rl = this.setupStdinLoop();
-        // 注册进程终止信号处理器，确保优雅退出
-        process.on("SIGINT", async () => {
-            rl.close(); // 关闭 readline 接口
-            await this.leave(); // 通知其他节点本节点离开
-            process.exit(0);
-        });
-        // 注册 SIGUSR1 信号处理器，打印所有节点信息
-        process.on("SIGUSR1", () => {
-            console.log("=== All Nodes Information ===");
-            for (const [id, nodeInfo] of this.nodes.entries()) {
-                console.log(`Node ID: ${id}`);
-                console.log(`  Address: ${nodeInfo.addr}`);
-            }
-            console.log(`Total nodes: ${this.nodes.size}`);
-            console.log("=============================");
-        });
-        // 注册 SIGUSR2 信号处理器，打印所有数据
-        process.on("SIGUSR2", () => {
-            console.log("=== All Data Managed by Search ===");
-            const data = this.engine.getData();
-            data.forEach((item, index) => {
-                console.log(`[${index + 1}] ${item}`);
-            });
-            console.log(`Total data items: ${data.length}`);
-            console.log("==================================");
-        });
+        this.setupIoLoop();
         console.log(`Node ${this.id} listening on ${this.addr}`);
         // 将自己加入节点列表
         this.nodes.set(this.id, {
