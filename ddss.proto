@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package cn.edu.ustc.kclab.ddss;
+
+// 节点信息
+message Node {
+    string id = 1;      // 节点唯一标识符
+    string addr = 2;    // 节点地址（格式: IP:端口）
+}
+
+// 加入集群请求
+message JoinRequest {
+    Node node = 1;  // 请求加入的节点信息
+}
+
+// 加入集群响应
+message JoinResponse {
+    repeated Node nodes = 1;  // 当前集群中所有节点的列表
+}
+
+// 离开集群请求
+message LeaveRequest {
+    Node node = 1;  // 请求离开的节点信息
+}
+
+// 离开集群响应
+message LeaveResponse {
+}
+
+service Cluster {
+    // 向对方节点发送加入请求, 对方负责将本节点信息加入其本地信息, 并返回当前集群中所有节点的信息, 由本节点负责向其他节点发送加入请求
+    rpc Join(JoinRequest) returns (JoinResponse);
+    // 向对方节点发送离开请求, 对方负责将本节点信息从其本地信息中删除, 由本节点负责向所有节点发送离开请求
+    rpc Leave(LeaveRequest) returns (LeaveResponse);
+}
+
+// 引擎类型
+enum EngineKind {
+    EAGER = 0;  // 积极模式：主动搜索数据
+    LAZY = 1;   // 惰性模式：被动响应查询
+}
+
+// 引擎元数据
+message EngineMetaData {
+    string id = 1;                  // 引擎标识符
+    EngineKind kind = 2;            // 引擎类型
+    repeated string input = 3;      // 输入数据模式列表
+    repeated string output = 4;     // 输出数据模式列表
+}
+
+// 获取元数据请求
+message MetaDataRequest {
+}
+
+// 获取元数据响应
+message MetaDataResponse {
+    EngineMetaData metadata = 1;  // 引擎元数据信息
+}
+
+// 推送数据请求
+message PushDataRequest {
+    repeated string data = 1;  // 要推送的数据列表
+}
+
+// 推送数据响应
+message PushDataResponse {
+}
+
+// 拉取数据请求
+message PullDataRequest {
+}
+
+// 拉取数据响应
+message PullDataResponse {
+    repeated string data = 1;  // 返回的数据列表
+}
+
+service Engine {
+    // 获取引擎的元数据信息
+    rpc MetaData(MetaDataRequest) returns (MetaDataResponse);
+    // 推送数据到对方, 对方不负责转发到其他节点
+    rpc PushData(PushDataRequest) returns (PushDataResponse);
+    // 从对方拉取先前所有数据, 对方不负责收集其他节点数据
+    rpc PullData(PullDataRequest) returns (PullDataResponse);
+}
