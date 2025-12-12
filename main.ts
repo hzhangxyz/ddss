@@ -347,9 +347,9 @@ class ClusterNode {
     async list(addr: string): Promise<Node[]> {
         const client = new ClusterClient(addr, grpc.credentials.createInsecure());
         const listAsync = promisify<ListRequest, ListResponse>(client.list).bind(client);
-        console.log(`Listing nodes from ${addr}`);
         const response = await listAsync({});
         client.close();
+        console.log(`Listing nodes: ${response.nodes.length} nodes from ${addr}`);
         return response.nodes;
     }
     /**
