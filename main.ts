@@ -57,6 +57,8 @@ interface NodeInfoWithClient {
  */
 class Search extends Search_ {
     private data: Set<string>;
+    private pendingResults: string[] = [];
+    private currentIndex: number = 0;
 
     /**
      * 构造函数
@@ -83,16 +85,39 @@ class Search extends Search_ {
     }
 
     /**
-     * 执行搜索并输出结果
-     * @param {function} callback - 处理搜索结果的回调函数
-     * @returns {*} - 搜索执行结果
+     * 执行搜索并输出结果（迭代器形式）
+     * 如果有待处理的结果，先yield它们；否则执行新的execute()收集结果
+     * callback必须返回false以保持数据结构完整性
+     * @returns {Generator<string>} - 生成器，每次yield一个搜索结果
      */
-    output(callback: (result: string) => boolean): number {
-        return super.execute((candidate: Rule) => {
+    *output(): Generator<string> {
+        // 如果有待处理的结果，先yield它们
+        yield* this.yieldPendingResults();
+
+        // 所有待处理结果已yield完，执行新的execute()
+        this.pendingResults = [];
+        this.currentIndex = 0;
+
+        // 调用execute()收集新结果，callback必须返回false
+        super.execute((candidate: Rule) => {
             const result = unparse(candidate.toString());
-            this.data.add(result); // 保存搜索结果到数据集合
-            return callback(result);
+            this.data.add(result);
+            this.pendingResults.push(result);
+            // 必须返回false以保持数据结构完整性
+            return false;
         });
+
+        // yield新收集的结果
+        yield* this.yieldPendingResults();
+    }
+
+    /**
+     * 辅助方法：yield待处理的结果
+     */
+    private *yieldPendingResults(): Generator<string> {
+        while (this.currentIndex < this.pendingResults.length) {
+            yield this.pendingResults[this.currentIndex++];
+        }
     }
 
     /**
@@ -138,11 +163,10 @@ class ClusterNode {
             const begin = Date.now();
             const data: string[] = []; // 存储本轮搜索发现的新数据
             // 执行搜索引擎，处理搜索结果
-            this.engine.output((result: string) => {
+            for (const result of this.engine.output()) {
                 data.push(result); // 添加到待推送列表（结果已由 engine.output 自动保存）
                 console.log(`Found data: ${result}`);
-                return false; // 继续搜索
-            });
+            }
             // 如果发现新数据，推送到所有其他节点
             if (data.length > 0) {
                 for (const id of this.nodes.keys()) {
