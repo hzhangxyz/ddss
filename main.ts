@@ -134,12 +134,10 @@ class ClusterNode {
             const data: string[] = [];
             this.engine.output((result: string) => {
                 data.push(result);
+                console.log(`Found data: ${result}`);
                 return false;
             });
             if (data.length > 0) {
-                for (const result of data) {
-                    console.log(`Found data: ${result}`);
-                }
                 for (const id of this.nodes.keys()) {
                     if (id !== this.id) {
                         const node = this.nodes.get(id)!;
@@ -349,9 +347,9 @@ class ClusterNode {
     async list(addr: string): Promise<Node[]> {
         const client = new ClusterClient(addr, grpc.credentials.createInsecure());
         const listAsync = promisify<ListRequest, ListResponse>(client.list).bind(client);
+        console.log(`Listing nodes from ${addr}`);
         const response = await listAsync({});
         client.close();
-        console.log(`Listed nodes: ${response.nodes.length} nodes from ${addr}`);
         return response.nodes;
     }
     /**
