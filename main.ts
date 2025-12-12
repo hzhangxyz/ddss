@@ -84,14 +84,13 @@ class Search extends Search_ {
 
     /**
      * 执行搜索并输出结果（迭代器形式）
-     * 每次yield一个结果时，execute会暂停；下次调用output()会继续execute
+     * 每次迭代调用execute()处理一个结果；如果外部break，下次调用output()会继续新的execute()
      * @returns {Generator<string>} - 生成器，每次yield一个搜索结果
      */
     *output(): Generator<string> {
-        // 执行搜索，每次返回一个结果后立即停止（返回true）
-        // execute()应该在下次调用时继续之前的状态
-        let hasMore = true;
-        while (hasMore) {
+        // 循环调用execute()，每次只处理一个结果（callback返回true立即停止）
+        // 当execute()没有更多结果时（callback未被调用），循环结束
+        while (true) {
             let resultFound = false;
             let currentResult = "";
 
@@ -107,7 +106,8 @@ class Search extends Search_ {
             if (resultFound) {
                 yield currentResult;
             } else {
-                hasMore = false;
+                // execute()没有找到新结果，结束迭代
+                break;
             }
         }
     }
