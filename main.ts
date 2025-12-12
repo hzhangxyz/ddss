@@ -57,8 +57,6 @@ interface NodeInfoWithClient {
  */
 class Search extends Search_ {
     private data: Set<string>;
-    private pendingResults: string[] = [];
-    private currentIndex: number = 0;
 
     /**
      * 构造函数
@@ -86,38 +84,31 @@ class Search extends Search_ {
 
     /**
      * 执行搜索并输出结果（迭代器形式）
-     * 如果之前的迭代被中断（break），本次调用会先yield剩余结果，然后执行新的execute()
+     * 每次yield一个结果时，execute会暂停；下次调用output()会继续execute
      * @returns {Generator<string>} - 生成器，每次yield一个搜索结果
      */
     *output(): Generator<string> {
-        // 如果有待处理的结果（从上次break留下的），先yield它们
-        yield* this.yieldPendingResults();
-
-        // 只有当所有待处理结果都已yield后，才清空并执行新搜索
-        if (this.currentIndex >= this.pendingResults.length) {
-            // 清空待处理列表并重置索引
-            this.pendingResults = [];
-            this.currentIndex = 0;
-
-            // 执行新的搜索
+        // 执行搜索，每次返回一个结果后立即停止（返回true）
+        // execute()应该在下次调用时继续之前的状态
+        let hasMore = true;
+        while (hasMore) {
+            let resultFound = false;
+            let currentResult = "";
+            
             super.execute((candidate: Rule) => {
                 const result = unparse(candidate.toString());
-                this.data.add(result); // 保存搜索结果到数据集合
-                this.pendingResults.push(result);
-                return false; // 继续搜索收集所有结果
+                this.data.add(result);
+                currentResult = result;
+                resultFound = true;
+                // 返回true停止execute，这样每次只处理一个结果
+                return true;
             });
-
-            // Yield新搜索到的结果
-            yield* this.yieldPendingResults();
-        }
-    }
-
-    /**
-     * 辅助方法：yield待处理的结果
-     */
-    private *yieldPendingResults(): Generator<string> {
-        while (this.currentIndex < this.pendingResults.length) {
-            yield this.pendingResults[this.currentIndex++];
+            
+            if (resultFound) {
+                yield currentResult;
+            } else {
+                hasMore = false;
+            }
         }
     }
 
