@@ -152,9 +152,7 @@ class ClusterNode {
                         const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
                             node.client.engine.pushData,
                         ).bind(node.client.engine);
-                        await pushDataAsync({
-                            data,
-                        });
+                        await pushDataAsync({ data });
                     }
                 }
             }
@@ -195,9 +193,7 @@ class ClusterNode {
                     const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
                         node.client.engine.pushData,
                     ).bind(node.client.engine);
-                    await pushDataAsync({
-                        data: [formattedLine],
-                    });
+                    await pushDataAsync({ data: [formattedLine] });
                 }
             }
         });
@@ -221,9 +217,9 @@ class ClusterNode {
         process.on("SIGUSR2", () => {
             console.log("=== All Data Managed by Search ===");
             const data = this.engine.getData();
-            data.forEach((item, index) => {
-                console.log(`[${index + 1}] ${item}`);
-            });
+            for (const index in data) {
+                console.log(`[${index}] ${data[index]}`);
+            }
             console.log(`Total data items: ${data.length}`);
             console.log("==================================");
         });
@@ -272,9 +268,7 @@ class ClusterNode {
                     id: n.id,
                     addr: n.addr,
                 }));
-                callback(null, {
-                    nodes,
-                });
+                callback(null, { nodes });
             },
             /**
              * 处理节点离开请求
@@ -335,9 +329,7 @@ class ClusterNode {
                 call: grpc.ServerUnaryCall<PullDataRequest, PullDataResponse>,
                 callback: grpc.sendUnaryData<PullDataResponse>,
             ) => {
-                callback(null, {
-                    data: this.engine.getData(),
-                });
+                callback(null, { data: this.engine.getData() });
             },
         } as EngineServer);
         // 绑定服务器到指定地址
@@ -367,9 +359,7 @@ class ClusterNode {
         const client = new ClusterClient(addr, grpc.credentials.createInsecure());
         const joinAsync = promisify<JoinRequest, JoinResponse>(client.join).bind(client);
         // 向目标节点发送加入请求
-        const response = await joinAsync({
-            node: this,
-        });
+        const response = await joinAsync({ node: { id: this.id, addr: this.addr } });
         // 遍历集群中的所有节点
         const localData = this.engine.getData();
         for (const node of response.nodes) {
@@ -381,17 +371,13 @@ class ClusterNode {
                 const nodeJoinAsync = promisify<JoinRequest, JoinResponse>(nodeInfo.client.cluster.join).bind(
                     nodeInfo.client.cluster,
                 );
-                await nodeJoinAsync({
-                    node: this,
-                });
+                await nodeJoinAsync({ node: { id: this.id, addr: this.addr } });
                 // 如果本地有数据，推送给新节点
                 if (localData.length > 0) {
                     const nodePushAsync = promisify<PushDataRequest, PushDataResponse>(
                         nodeInfo.client.engine.pushData,
                     ).bind(nodeInfo.client.engine);
-                    await nodePushAsync({
-                        data: localData,
-                    });
+                    await nodePushAsync({ data: localData });
                 }
                 // 从该节点拉取历史数据
                 const nodePullAsync = promisify<PullDataRequest, PullDataResponse>(
@@ -420,9 +406,7 @@ class ClusterNode {
                 const leaveAsync = promisify<LeaveRequest, LeaveResponse>(node.client.cluster.leave).bind(
                     node.client.cluster,
                 );
-                await leaveAsync({
-                    node: this,
-                });
+                await leaveAsync({ node: { id: this.id, addr: this.addr } });
                 console.log(`Leaving node ${node.id} at ${node.addr}`);
             }
         }
