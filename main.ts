@@ -128,15 +128,6 @@ class ClusterNode {
         this.engine = new Search(limit_size, buffer_size); // 创建搜索引擎实例
         this.server = new grpc.Server();
         this.nodes = new Map(); // 存储集群中所有节点信息
-        // 将自己加入节点列表
-        this.nodes.set(id, {
-            id,
-            addr,
-            client: {
-                cluster: null as any,
-                engine: null as any,
-            },
-        });
     }
     /**
      * 设置定时循环执行搜索任务
@@ -326,7 +317,8 @@ class ClusterNode {
         });
         // 绑定服务器到指定地址
         const bindAsync = promisify<string, grpc.ServerCredentials, number>(this.server.bindAsync).bind(this.server);
-        await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
+        const port = await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
+        this.addr = `${this.addr.split(":")[0]}:${port}`;
         this.setupSearchLoop();
         const rl = this.setupStdinLoop();
         // 注册进程终止信号处理器，确保优雅退出
@@ -356,6 +348,15 @@ class ClusterNode {
             console.log("==================================");
         });
         console.log(`Node ${this.id} listening on ${this.addr}`);
+        // 将自己加入节点列表
+        this.nodes.set(this.id, {
+            id: this.id,
+            addr: this.addr,
+            client: {
+                cluster: null as any,
+                engine: null as any,
+            },
+        });
         return this;
     }
     /**
