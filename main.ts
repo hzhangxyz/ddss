@@ -57,6 +57,8 @@ interface NodeInfoWithClient {
  */
 class Search extends Search_ {
     private data: Set<string>;
+    private pendingResults: string[] = [];
+    private currentIndex: number = 0;
 
     /**
      * 构造函数
@@ -84,31 +86,32 @@ class Search extends Search_ {
 
     /**
      * 执行搜索并输出结果（迭代器形式）
-     * 每次迭代调用execute()处理一个结果；如果外部break，下次调用output()会继续新的execute()
+     * 如果有待处理的结果，先yield它们；否则执行新的execute()收集结果
+     * callback必须返回false以保持数据结构完整性
      * @returns {Generator<string>} - 生成器，每次yield一个搜索结果
      */
     *output(): Generator<string> {
-        // 循环调用execute()，每次只处理一个结果（callback返回true立即停止）
-        // 当execute()没有更多结果时（callback未被调用），循环结束
-        while (true) {
-            let resultFound = false;
-            let currentResult = "";
+        // 如果有待处理的结果，先yield它们
+        while (this.currentIndex < this.pendingResults.length) {
+            yield this.pendingResults[this.currentIndex++];
+        }
 
-            super.execute((candidate: Rule) => {
-                const result = unparse(candidate.toString());
-                this.data.add(result);
-                currentResult = result;
-                resultFound = true;
-                // 返回true停止execute，这样每次只处理一个结果
-                return true;
-            });
+        // 所有待处理结果已yield完，执行新的execute()
+        this.pendingResults = [];
+        this.currentIndex = 0;
 
-            if (resultFound) {
-                yield currentResult;
-            } else {
-                // execute()没有找到新结果，结束迭代
-                break;
-            }
+        // 调用execute()收集新结果，callback必须返回false
+        super.execute((candidate: Rule) => {
+            const result = unparse(candidate.toString());
+            this.data.add(result);
+            this.pendingResults.push(result);
+            // 必须返回false以保持数据结构完整性
+            return false;
+        });
+
+        // yield新收集的结果
+        while (this.currentIndex < this.pendingResults.length) {
+            yield this.pendingResults[this.currentIndex++];
         }
     }
 
