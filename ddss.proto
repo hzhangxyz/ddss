@@ -36,7 +36,7 @@ message ListResponse {
 }
 
 service Cluster {
-    // 向对方节点发送加入请求, 对方负责将本节点信息加入其本地信息, 不再返回节点列表
+    // 向对方节点发送加入请求, 对方负责将本节点信息加入其本地信息
     rpc Join(JoinRequest) returns (JoinResponse);
     // 向对方节点发送离开请求, 对方负责将本节点信息从其本地信息中删除, 由本节点负责向所有节点发送离开请求
     rpc Leave(LeaveRequest) returns (LeaveResponse);

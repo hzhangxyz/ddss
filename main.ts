@@ -392,22 +392,22 @@ class ClusterNode {
                 const nodeInfo = this.nodeInfo(node.id, node.addr);
                 this.nodes.set(node.id, nodeInfo);
                 // 向该节点发送加入请求
-                const nodeJoinAsync = promisify<JoinRequest, JoinResponse>(nodeInfo.client.cluster.join).bind(
+                const joinAsync = promisify<JoinRequest, JoinResponse>(nodeInfo.client.cluster.join).bind(
                     nodeInfo.client.cluster,
                 );
-                await nodeJoinAsync({ node: { id: this.id, addr: this.addr } });
+                await joinAsync({ node: { id: this.id, addr: this.addr } });
                 // 如果本地有数据，推送给新节点
                 if (localData.length > 0) {
-                    const nodePushAsync = promisify<PushDataRequest, PushDataResponse>(
+                    const pushAsync = promisify<PushDataRequest, PushDataResponse>(
                         nodeInfo.client.engine.pushData,
                     ).bind(nodeInfo.client.engine);
-                    await nodePushAsync({ data: localData });
+                    await pushAsync({ data: localData });
                 }
                 // 从该节点拉取历史数据
-                const nodePullAsync = promisify<PullDataRequest, PullDataResponse>(
+                const pullAsync = promisify<PullDataRequest, PullDataResponse>(
                     nodeInfo.client.engine.pullData,
                 ).bind(nodeInfo.client.engine);
-                const dataResponse = await nodePullAsync({});
+                const dataResponse = await pullAsync({});
                 if (dataResponse.data) {
                     for (const item of dataResponse.data) {
                         console.log(`Receiving data: ${item}`);
@@ -432,6 +432,9 @@ class ClusterNode {
                 );
                 await leaveAsync({ node: { id: this.id, addr: this.addr } });
                 console.log(`Leaving node ${node.id} at ${node.addr}`);
+                // 关闭客户端连接
+                node.client.cluster.close();
+                node.client.engine.close();
             }
         }
     }
