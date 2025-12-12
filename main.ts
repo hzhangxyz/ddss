@@ -92,9 +92,7 @@ class Search extends Search_ {
      */
     *output(): Generator<string> {
         // 如果有待处理的结果，先yield它们
-        while (this.currentIndex < this.pendingResults.length) {
-            yield this.pendingResults[this.currentIndex++];
-        }
+        yield* this.yieldPendingResults();
 
         // 所有待处理结果已yield完，执行新的execute()
         this.pendingResults = [];
@@ -110,6 +108,13 @@ class Search extends Search_ {
         });
 
         // yield新收集的结果
+        yield* this.yieldPendingResults();
+    }
+
+    /**
+     * 辅助方法：yield待处理的结果
+     */
+    private *yieldPendingResults(): Generator<string> {
         while (this.currentIndex < this.pendingResults.length) {
             yield this.pendingResults[this.currentIndex++];
         }
