@@ -180,20 +180,18 @@ class EagerEngineScheduler {
 class ClusterManager {
     private nodes: Map<string, NodeInfo>;
     private localId: string;
-    private localAddr: string;
 
-    constructor(localId: string, localAddr: string) {
+    constructor(localId: string, _localAddr: string) {
         this.nodes = new Map();
         this.localId = localId;
-        this.localAddr = localAddr;
-    }
-
-    getAllOtherNodes(): NodeInfo[] {
-        return this.getAllNodes().filter((node) => node.id !== this.localId);
     }
 
     getAllNodes(): NodeInfo[] {
         return Array.from(this.nodes.values());
+    }
+
+    getAllOtherNodes(): NodeInfo[] {
+        return this.getAllNodes().filter((node) => node.id !== this.localId);
     }
 
     getAllNodeInfo(): Node[] {
@@ -243,13 +241,11 @@ interface NetworkHandlerCallbacks {
 
 class NetworkHandler {
     private server: grpc.Server;
-    private id: string;
     private addr: string;
     private callbacks: NetworkHandlerCallbacks;
 
-    constructor(addr: string, id: string, callbacks: NetworkHandlerCallbacks) {
+    constructor(addr: string, _id: string, callbacks: NetworkHandlerCallbacks) {
         this.server = new grpc.Server();
-        this.id = id;
         this.addr = addr;
         this.callbacks = callbacks;
     }
@@ -419,7 +415,7 @@ class EagerNode {
 
                     await this.syncDataWithNode(nodeClient);
 
-                    console.log(`Joined node: ${node.id} at ${node.addr}`);
+                    console.log(`Joining node: ${node.id} at ${node.addr}`);
                 }
             }
 
@@ -439,7 +435,7 @@ class EagerNode {
             try {
                 await this.networkHandler.callLeave(currentNode, node.client);
                 this.clusterManager.removeNode(node.id);
-                console.log(`Left node: ${node.id}`);
+                console.log(`Leaving node: ${node.id}`);
             } catch (error) {
                 console.error(`Failed to leave node ${node.id}:`, error);
             }
@@ -503,28 +499,20 @@ class EagerNode {
         }
         const otherNodes = this.clusterManager.getAllOtherNodes();
         for (const node of otherNodes) {
-            try {
-                await this.networkHandler.callPushData(results, node.client);
-            } catch (error) {
-                console.error(`Failed to push data to node ${node.id}:`, error);
-            }
+            await this.networkHandler.callPushData(results, node.client);
         }
     }
 
     private async syncDataWithNode(client: NodeClient): Promise<void> {
-        try {
-            const localData = this.engineScheduler.getData();
-            if (localData.length > 0) {
-                await this.networkHandler.callPushData(localData, client);
-            }
+        const localData = this.engineScheduler.getData();
+        if (localData.length > 0) {
+            await this.networkHandler.callPushData(localData, client);
+        }
 
-            const remoteData = await this.networkHandler.callPullData(client);
-            if (remoteData.length > 0) {
-                this.engineScheduler.addDataBatch(remoteData);
-                console.log(`Synced ${remoteData.length} data items from remote`);
-            }
-        } catch (error) {
-            console.error("Data sync failed:", error);
+        const remoteData = await this.networkHandler.callPullData(client);
+        if (remoteData.length > 0) {
+            this.engineScheduler.addDataBatch(remoteData);
+            console.log(`Synced ${remoteData.length} data items from remote`);
         }
     }
 
@@ -545,11 +533,7 @@ class EagerNode {
 
                 const otherNodes = this.clusterManager.getAllOtherNodes();
                 for (const node of otherNodes) {
-                    try {
-                        await this.networkHandler.callPushData([formatted], node.client);
-                    } catch (error) {
-                        console.error(`Failed to push input to node ${node.id}:`, error);
-                    }
+                    await this.networkHandler.callPushData([formatted], node.client);
                 }
             }
         });
@@ -585,10 +569,6 @@ class EagerNode {
             console.log(`Total data items: ${data.length}`);
             console.log("========================\n");
         });
-    }
-
-    getNodeInfo(): { id: string; addr: string } {
-        return { id: this.id, addr: this.addr };
     }
 }
 
