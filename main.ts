@@ -48,11 +48,9 @@ interface NodeInfoWithClient {
 
 /**
  * 搜索引擎类
- * 扩展 ATSDS 的 Search 类，提供字符串形式的规则处理和数据管理
+ * 扩展 ATSDS 的 Search 类，提供字符串形式的规则处理
  */
 class Search extends Search_ {
-    private data: Set<string>;
-
     /**
      * 构造函数
      * @param {number} limit_size - Size of the buffer for storing the final objects (rules/facts) in the knowledge base (default: 1000)
@@ -60,7 +58,6 @@ class Search extends Search_ {
      */
     constructor(limit_size: number = 1000, buffer_size: number = 10000) {
         super(limit_size, buffer_size);
-        this.data = new Set();
     }
 
     /**
@@ -71,7 +68,6 @@ class Search extends Search_ {
         const parsedRule = parse(rule);
         if (super.add(parsedRule)) {
             const unparsedRule = unparse(parsedRule);
-            this.data.add(unparsedRule);
             return unparsedRule;
         }
         return null;
@@ -85,18 +81,9 @@ class Search extends Search_ {
     output(callback: (result: string) => void): number {
         return super.execute((candidate: Rule) => {
             const result = unparse(candidate.toString());
-            this.data.add(result);
             callback(result);
             return false;
         });
-    }
-
-    /**
-     * 获取所有已存储的数据
-     * @returns {Array<string>} - 数据数组
-     */
-    getData(): string[] {
-        return Array.from(this.data);
     }
 }
 
@@ -110,6 +97,7 @@ class ClusterNode {
     engine: Search;
     server: grpc.Server;
     nodes: Map<string, NodeInfoWithClient>;
+    private data: Set<string>;
 
     /**
      * 构造函数
@@ -124,6 +112,14 @@ class ClusterNode {
         this.engine = new Search(limit_size, buffer_size);
         this.server = new grpc.Server();
         this.nodes = new Map();
+        this.data = new Set();
+    }
+    /**
+     * 获取所有已存储的数据
+     * @returns {Array<string>} - 数据数组
+     */
+    private getData(): string[] {
+        return Array.from(this.data);
     }
     /**
      * 设置定时循环执行搜索任务
@@ -134,6 +130,7 @@ class ClusterNode {
             const begin = Date.now();
             const data: string[] = [];
             this.engine.output((result: string) => {
+                this.data.add(result);
                 data.push(result);
                 console.log(`Found data: ${result}`);
             });
@@ -174,6 +171,7 @@ class ClusterNode {
             if (formattedLine === null) {
                 return;
             }
+            this.data.add(formattedLine);
             console.log(`Received input: ${formattedLine}`);
             for (const id of this.nodes.keys()) {
                 if (id !== this.id) {
@@ -201,7 +199,7 @@ class ClusterNode {
         });
         process.on("SIGUSR2", () => {
             console.log("=== All Data Managed by Search ===");
-            const data = this.engine.getData();
+            const data = this.getData();
             for (const index in data) {
                 console.log(`[${index}] ${data[index]}`);
             }
@@ -307,7 +305,10 @@ class ClusterNode {
             ) => {
                 const data = call.request.data!;
                 for (const item of data) {
-                    this.engine.input(item);
+                    const formattedItem = this.engine.input(item);
+                    if (formattedItem !== null) {
+                        this.data.add(formattedItem);
+                    }
                     console.log(`Received data: ${item}`);
                 }
                 callback(null, {});
@@ -320,7 +321,7 @@ class ClusterNode {
                 _call: grpc.ServerUnaryCall<PullDataRequest, PullDataResponse>,
                 callback: grpc.sendUnaryData<PullDataResponse>,
             ) => {
-                callback(null, { data: this.engine.getData() });
+                callback(null, { data: this.getData() });
             },
         } as EngineServer);
         const bindAsync = promisify<string, grpc.ServerCredentials, number>(this.server.bindAsync).bind(this.server);
@@ -357,7 +358,7 @@ class ClusterNode {
      * @param {Node[]} nodes - 要加入的节点列表
      */
     async join(nodes: Node[]): Promise<void> {
-        const localData = this.engine.getData();
+        const localData = this.getData();
         for (const node of nodes) {
             if (!this.nodes.has(node.id)) {
                 const nodeInfo = this.nodeInfo(node.id, node.addr);
@@ -378,7 +379,10 @@ class ClusterNode {
                 const dataResponse = await pullAsync({});
                 if (dataResponse.data) {
                     for (const item of dataResponse.data) {
-                        this.engine.input(item);
+                        const formattedItem = this.engine.input(item);
+                        if (formattedItem !== null) {
+                            this.data.add(formattedItem);
+                        }
                         console.log(`Receiving data: ${item}`);
                     }
                 }
