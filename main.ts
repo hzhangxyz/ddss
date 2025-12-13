@@ -100,16 +100,14 @@ class EagerNode {
             if (trimmedLine.length === 0) {
                 return;
             }
-            if (this.dataManager.addData(trimmedLine)) {
-                const formattedLine = this.dataManager.getEngine().input(trimmedLine);
-                if (formattedLine !== null) {
-                    console.log(`Received input: ${formattedLine}`);
-                    await this.dataManager.syncDataToNodes(
-                        this.clusterManager.getNodes(),
-                        this.clusterManager.getLocalNodeId(),
-                        [formattedLine],
-                    );
-                }
+            const formattedLine = this.dataManager.addData(trimmedLine);
+            if (formattedLine !== null) {
+                console.log(`Received input: ${formattedLine}`);
+                await this.dataManager.syncDataToNodes(
+                    this.clusterManager.getNodes(),
+                    this.clusterManager.getLocalNodeId(),
+                    [formattedLine],
+                );
             }
         });
         process.on("SIGINT", async () => {
@@ -203,8 +201,9 @@ class EagerNode {
                 const remoteData = await this.dataManager.pullDataFromNode(nodeInfo);
                 if (remoteData) {
                     for (const item of remoteData) {
-                        if (this.dataManager.addData(item)) {
-                            console.log(`Receiving data: ${item}`);
+                        const formattedItem = this.dataManager.addData(item);
+                        if (formattedItem !== null) {
+                            console.log(`Receiving data: ${formattedItem}`);
                         }
                     }
                 }

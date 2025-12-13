@@ -36,9 +36,10 @@ export class EngineScheduler {
 
             // 执行搜索并收集新数据
             this.dataManager.getEngine().output((result: string) => {
-                if (this.dataManager.addData(result)) {
-                    newData.push(result);
-                    console.log(`Found data: ${result}`);
+                const formattedResult = this.dataManager.addData(result);
+                if (formattedResult !== null) {
+                    newData.push(formattedResult);
+                    console.log(`Found data: ${formattedResult}`);
                 }
             });
 

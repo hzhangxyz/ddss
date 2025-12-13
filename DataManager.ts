@@ -52,15 +52,15 @@ export class DataManager {
     /**
      * 添加数据到本地存储
      * @param {string} item - 要添加的数据
-     * @returns {boolean} - 是否成功添加
+     * @returns {string | null} - 返回格式化后的数据，如果添加失败返回 null
      */
-    addData(item: string): boolean {
+    addData(item: string): string | null {
         const formattedItem = this.engine.input(item);
         if (formattedItem !== null) {
             this.data.add(formattedItem);
-            return true;
+            return formattedItem;
         }
-        return false;
+        return null;
     }
 
     /**

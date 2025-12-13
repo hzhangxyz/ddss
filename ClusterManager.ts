@@ -10,7 +10,7 @@ import {
     type Node,
     ClusterClient,
     type ClusterServer,
-    type EngineClient,
+    EngineClient,
 } from "./ddss.js";
 
 /**
@@ -125,7 +125,12 @@ export class ClusterManager {
                 if (node) {
                     const { id, addr } = node;
                     if (!this.nodes.has(id)) {
-                        // Note: client will be set by the caller
+                        // Create clients to connect back to the joining node
+                        const client: NodeClient = {
+                            cluster: new ClusterClient(addr, grpc.credentials.createInsecure()),
+                            engine: new EngineClient(addr, grpc.credentials.createInsecure()),
+                        };
+                        this.nodes.set(id, { id, addr, client });
                         console.log(`Joined node: ${id} at ${addr}`);
                     }
                 }
