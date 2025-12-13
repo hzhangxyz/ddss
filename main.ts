@@ -499,20 +499,28 @@ class EagerNode {
         }
         const otherNodes = this.clusterManager.getAllOtherNodes();
         for (const node of otherNodes) {
-            await this.networkHandler.callPushData(results, node.client);
+            try {
+                await this.networkHandler.callPushData(results, node.client);
+            } catch (_error) {
+                // Silent failure when pushing data to other nodes
+            }
         }
     }
 
     private async syncDataWithNode(client: NodeClient): Promise<void> {
-        const localData = this.engineScheduler.getData();
-        if (localData.length > 0) {
-            await this.networkHandler.callPushData(localData, client);
-        }
+        try {
+            const localData = this.engineScheduler.getData();
+            if (localData.length > 0) {
+                await this.networkHandler.callPushData(localData, client);
+            }
 
-        const remoteData = await this.networkHandler.callPullData(client);
-        if (remoteData.length > 0) {
-            this.engineScheduler.addDataBatch(remoteData);
-            console.log(`Synced ${remoteData.length} data items from remote`);
+            const remoteData = await this.networkHandler.callPullData(client);
+            if (remoteData.length > 0) {
+                this.engineScheduler.addDataBatch(remoteData);
+                console.log(`Synced ${remoteData.length} data items from remote`);
+            }
+        } catch (_error) {
+            // Silent failure when syncing data
         }
     }
 
@@ -533,7 +541,11 @@ class EagerNode {
 
                 const otherNodes = this.clusterManager.getAllOtherNodes();
                 for (const node of otherNodes) {
-                    await this.networkHandler.callPushData([formatted], node.client);
+                    try {
+                        await this.networkHandler.callPushData([formatted], node.client);
+                    } catch (_error) {
+                        // Silent failure when pushing data to other nodes
+                    }
                 }
             }
         });
