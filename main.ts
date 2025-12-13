@@ -103,11 +103,11 @@ class Search extends Search_ {
  * 管理分布式搜索引擎集群中的单个节点
  */
 class ClusterNode {
-    id: string;
-    addr: string;
-    engine: Search;
-    server: grpc.Server;
-    nodes: Map<string, NodeInfoWithClient>;
+    private id: string;
+    private addr: string;
+    private engine: Search;
+    private server: grpc.Server;
+    private nodes: Map<string, NodeInfoWithClient>;
     private data: Set<string>;
 
     /**
