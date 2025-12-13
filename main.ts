@@ -2,6 +2,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import * as grpc from "@grpc/grpc-js";
+import { Command } from "commander";
 import { Search as Search_, type Rule } from "atsds";
 import { parse, unparse } from "atsds-bnf";
 import {
@@ -446,36 +447,40 @@ function addAddressPrefixForPort(addrOrPort: string, ip: string): string {
 // ============================================================
 
 /**
- * 命令行参数检查
- * 用法: node dist/main.mjs <bind_addr> [<join_addr>]
- *   bind_addr: 本节点绑定的端口号
- *   join_addr: (可选) 要加入的集群中某个节点的端口号
+ * 配置命令行接口
+ * 使用 commander 提供专业的参数解析
  */
-if (process.argv.length < 3 || process.argv.length > 4) {
-    console.error("Usage: main <bind_addr> [<join_addr>]");
-    process.exit(1);
-}
+const program = new Command();
+
+program
+    .name("ddss")
+    .description("Distributed Data Search System - A cluster-based search engine")
+    .version("0.0.5")
+    .option("-b, --bind <address>", "Bind address (port or host:port)", "0.0.0.0:50051")
+    .option("-j, --join <address>", "Join existing cluster at address (port or host:port)")
+    .parse(process.argv);
+
+const options = program.opts();
+
+// 解析 bind 地址
+const bindAddr = addAddressPrefixForPort(options.bind, "0.0.0.0");
 
 /**
  * 场景一: 加入现有集群
  * 启动节点并加入指定地址的集群
  */
-if (process.argv.length === 4) {
-    const listenAddr = addAddressPrefixForPort(process.argv[2], "0.0.0.0");
-    const joinAddr = addAddressPrefixForPort(process.argv[3], "127.0.0.1");
-    console.log(`Starting node at ${listenAddr} and joining ${joinAddr}`);
-    const node = new ClusterNode(listenAddr);
+if (options.join) {
+    const joinAddr = addAddressPrefixForPort(options.join, "127.0.0.1");
+    console.log(`Starting node at ${bindAddr} and joining ${joinAddr}`);
+    const node = new ClusterNode(bindAddr);
     await node.listen();
     await node.join(await node.list(joinAddr));
-}
-
-/**
- * 场景二: 创建新集群
- * 启动第一个节点，作为集群的初始节点
- */
-if (process.argv.length === 3) {
-    const listenAddr = addAddressPrefixForPort(process.argv[2], "0.0.0.0");
-    console.log(`Starting node at ${listenAddr}`);
-    const node = new ClusterNode(listenAddr);
+} else {
+    /**
+     * 场景二: 创建新集群
+     * 启动第一个节点，作为集群的初始节点
+     */
+    console.log(`Starting node at ${bindAddr}`);
+    const node = new ClusterNode(bindAddr);
     await node.listen();
 }
