@@ -1,4 +1,5 @@
 import { promisify } from "node:util";
+import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import * as grpc from "@grpc/grpc-js";
@@ -159,10 +160,10 @@ class EagerNode {
         return Array.from(this.data);
     }
     /**
-     * 设置定时循环执行搜索任务
+     * 设置定时循环执行引擎任务
      * 每秒执行一次搜索，并将新发现的数据推送到其他节点
      */
-    private setupSearchLoop(): void {
+    private setupEngineLoop(): void {
         const loop = async (): Promise<void> => {
             const begin = Date.now();
             const data: string[] = [];
@@ -187,9 +188,10 @@ class EagerNode {
             const end = Date.now();
             const cost = end - begin;
             const waiting = Math.max(1000 - cost, 0);
-            setTimeout(loop, waiting);
+            await sleep(waiting);
+            await loop();
         };
-        setTimeout(loop, 0);
+        setImmediate(loop);
     }
     /**
      * 设置IO读取循环与信号处理器
@@ -375,7 +377,7 @@ class EagerNode {
         const bindAsync = promisify<string, grpc.ServerCredentials, number>(this.server.bindAsync).bind(this.server);
         const port = await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
         this.addr = `${this.addr.split(":")[0]}:${port}`;
-        this.setupSearchLoop();
+        this.setupEngineLoop();
         this.setupIoLoop();
         this.nodes.set(this.id, {
             id: this.id,
