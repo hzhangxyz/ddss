@@ -179,11 +179,11 @@ class EagerEngineScheduler {
 
 class ClusterManager {
     private nodes: Map<string, NodeInfo>;
-    private localId: string;
+    private id: string;
 
-    constructor(localId: string, _localAddr: string) {
+    constructor(id: string) {
         this.nodes = new Map();
-        this.localId = localId;
+        this.id = id;
     }
 
     getAllNodes(): NodeInfo[] {
@@ -191,7 +191,7 @@ class ClusterManager {
     }
 
     getAllOtherNodes(): NodeInfo[] {
-        return this.getAllNodes().filter((node) => node.id !== this.localId);
+        return this.getAllNodes().filter((node) => node.id !== this.id);
     }
 
     getAllNodeInfo(): Node[] {
@@ -367,7 +367,7 @@ class EagerNode {
         this.id = id;
         this.addr = addr;
 
-        this.clusterManager = new ClusterManager(id, addr);
+        this.clusterManager = new ClusterManager(id);
         this.engineScheduler = new EagerEngineScheduler(engine, this.handleSearchResults.bind(this));
         this.networkHandler = new NetworkHandler(addr, id, {
             onJoin: this.handleJoinRequest.bind(this),
@@ -435,13 +435,8 @@ class EagerNode {
 
     private async handleJoinRequest(node: Node): Promise<void> {
         if (!this.clusterManager.hasNode(node.id)) {
-            const { client } = this.clusterManager.addNode(node.id, node.addr);
+            this.clusterManager.addNode(node.id, node.addr);
             console.log(`Node joined: ${node.id} at ${node.addr}`);
-
-            const data = this.engineScheduler.getData();
-            if (data.length > 0) {
-                await this.networkHandler.callPushData(data, client);
-            }
         }
     }
 
@@ -486,7 +481,7 @@ class EagerNode {
         if (results.length === 0) return;
 
         for (const result of results) {
-            console.log(`Found result: ${result}`);
+            console.log(`Data found: ${result}`);
         }
         const otherNodes = this.clusterManager.getAllOtherNodes();
         for (const node of otherNodes) {
@@ -502,8 +497,10 @@ class EagerNode {
 
         const remoteData = await this.networkHandler.callPullData(client);
         if (remoteData.length > 0) {
-            this.engineScheduler.addDataBatch(remoteData);
-            console.log(`Synced ${remoteData.length} data items from remote`);
+            const formatted = this.engineScheduler.addDataBatch(remoteData);
+            for (const item of formatted) {
+                console.log(`Pulling data: ${item}`);
+            }
         }
     }
 
@@ -520,7 +517,7 @@ class EagerNode {
 
             const formatted = this.engineScheduler.addData(trimmed);
             if (formatted) {
-                console.log(`Input processed: ${formatted}`);
+                console.log(`Data read: ${formatted}`);
 
                 const otherNodes = this.clusterManager.getAllOtherNodes();
                 for (const node of otherNodes) {
@@ -536,7 +533,7 @@ class EagerNode {
         });
 
         process.on("SIGUSR1", () => {
-            console.log("\n=== Cluster Information ===");
+            console.log("=== Cluster Information ===");
             console.log(`Current Node: ${this.id} at ${this.addr}`);
             console.log("\nConnected Nodes:");
 
@@ -546,11 +543,11 @@ class EagerNode {
             });
 
             console.log(`Total nodes: ${nodes.length + 1}`);
-            console.log("===========================\n");
+            console.log("===========================");
         });
 
         process.on("SIGUSR2", () => {
-            console.log("\n=== Data Information ===");
+            console.log("=== Data Information ===");
             const data = this.engineScheduler.getData();
 
             data.forEach((item, index) => {
@@ -558,7 +555,7 @@ class EagerNode {
             });
 
             console.log(`Total data items: ${data.length}`);
-            console.log("========================\n");
+            console.log("========================");
         });
     }
 }
