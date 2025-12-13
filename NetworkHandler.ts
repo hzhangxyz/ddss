@@ -76,9 +76,7 @@ export class NetworkHandler {
                 const data = call.request.data;
                 if (data) {
                     for (const item of data) {
-                        if (this.dataManager.addData(item)) {
-                            console.log(`Received data: ${item}`);
-                        }
+                        this.dataManager.addDataWithLog(item, "Received data");
                     }
                 }
                 callback(null, {});

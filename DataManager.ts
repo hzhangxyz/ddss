@@ -74,6 +74,20 @@ export class DataManager {
     }
 
     /**
+     * 添加数据并记录日志
+     * @param {string} item - 要添加的数据
+     * @param {string} logPrefix - 日志前缀
+     * @returns {string | null} - 返回格式化后的数据，如果添加失败返回 null
+     */
+    addDataWithLog(item: string, logPrefix: string): string | null {
+        const formattedItem = this.addData(item);
+        if (formattedItem !== null) {
+            console.log(`${logPrefix}: ${formattedItem}`);
+        }
+        return formattedItem;
+    }
+
+    /**
      * 获取引擎
      */
     getEngine(): EagerEngine {

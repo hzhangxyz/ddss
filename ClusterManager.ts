@@ -76,11 +76,10 @@ export class ClusterManager {
     }
 
     /**
-     * 创建节点信息对象
+     * 添加节点到集群
      * @param {string} id - 节点 ID
      * @param {string} addr - 节点地址
      * @param {NodeClient} client - 节点客户端
-     * @returns {NodeInfoWithClient} 包含节点信息和 gRPC 客户端的对象
      */
     addNode(id: string, addr: string, client: NodeClient): void {
         this.nodes.set(id, { id, addr, client });

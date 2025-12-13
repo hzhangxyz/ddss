@@ -100,9 +100,8 @@ class EagerNode {
             if (trimmedLine.length === 0) {
                 return;
             }
-            const formattedLine = this.dataManager.addData(trimmedLine);
+            const formattedLine = this.dataManager.addDataWithLog(trimmedLine, "Received input");
             if (formattedLine !== null) {
-                console.log(`Received input: ${formattedLine}`);
                 await this.dataManager.syncDataToNodes(
                     this.clusterManager.getNodes(),
                     this.clusterManager.getLocalNodeId(),
@@ -201,10 +200,7 @@ class EagerNode {
                 const remoteData = await this.dataManager.pullDataFromNode(nodeInfo);
                 if (remoteData) {
                     for (const item of remoteData) {
-                        const formattedItem = this.dataManager.addData(item);
-                        if (formattedItem !== null) {
-                            console.log(`Receiving data: ${formattedItem}`);
-                        }
+                        this.dataManager.addDataWithLog(item, "Receiving data");
                     }
                 }
                 console.log(`Joining node ${node.id} at ${node.addr}`);
