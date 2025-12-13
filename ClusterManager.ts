@@ -137,7 +137,7 @@ export class ClusterManager {
             },
             /**
              * 处理节点离开请求
-             * 将请求节点从本地节点列表中移除
+             * 将请求节点从本地节点列表中移除并清理客户端连接
              */
             leave: async (
                 call: grpc.ServerUnaryCall<LeaveRequest, LeaveResponse>,
@@ -147,6 +147,14 @@ export class ClusterManager {
                 if (node) {
                     const { id, addr } = node;
                     if (this.nodes.has(id)) {
+                        const nodeInfo = this.nodes.get(id);
+                        if (nodeInfo) {
+                            // Clean up clients to prevent resource leaks
+                            nodeInfo.client.cluster.close();
+                            if (nodeInfo.client.engine) {
+                                nodeInfo.client.engine.close();
+                            }
+                        }
                         this.nodes.delete(id);
                         console.log(`Left node: ${id} at ${addr}`);
                     }
