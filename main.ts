@@ -161,35 +161,36 @@ class EagerNode {
     }
     /**
      * 设置定时循环执行引擎任务
-     * 每秒执行一次搜索，并将新发现的数据推送到其他节点
+     * 每秒执行一次引擎输出，并将新发现的数据推送到其他节点
      */
     private setupEngineLoop(): void {
         const loop = async (): Promise<void> => {
-            const begin = Date.now();
-            const data: string[] = [];
-            this.engine.output((result: string) => {
-                this.data.add(result);
-                data.push(result);
-                console.log(`Found data: ${result}`);
-            });
-            if (data.length > 0) {
-                for (const id of this.nodes.keys()) {
-                    if (id !== this.id) {
-                        const node = this.nodes.get(id);
-                        if (node) {
-                            const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
-                                node.client.engine.pushData,
-                            ).bind(node.client.engine);
-                            await pushDataAsync({ data });
+            while (true) {
+                const begin = Date.now();
+                const data: string[] = [];
+                this.engine.output((result: string) => {
+                    this.data.add(result);
+                    data.push(result);
+                    console.log(`Found data: ${result}`);
+                });
+                if (data.length > 0) {
+                    for (const id of this.nodes.keys()) {
+                        if (id !== this.id) {
+                            const node = this.nodes.get(id);
+                            if (node) {
+                                const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
+                                    node.client.engine.pushData,
+                                ).bind(node.client.engine);
+                                await pushDataAsync({ data });
+                            }
                         }
                     }
                 }
+                const end = Date.now();
+                const cost = end - begin;
+                const waiting = Math.max(1000 - cost, 0);
+                await sleep(waiting);
             }
-            const end = Date.now();
-            const cost = end - begin;
-            const waiting = Math.max(1000 - cost, 0);
-            await sleep(waiting);
-            await loop();
         };
         setImmediate(loop);
     }
