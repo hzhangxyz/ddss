@@ -126,6 +126,113 @@ class Search extends Search_ implements EagerEngine {
 }
 
 /**
+ * 集群管理器类
+ * 负责管理集群中的节点和节点生命周期事件
+ */
+class ClusterManager {
+    private nodes: Map<string, NodeInfoWithClient>;
+    private onNodeJoinedHooks: Array<(node: NodeInfoWithClient) => void | Promise<void>>;
+    private onNodeLeftHooks: Array<(node: NodeInfoWithClient) => void | Promise<void>>;
+
+    /**
+     * 构造函数
+     */
+    constructor() {
+        this.nodes = new Map();
+        this.onNodeJoinedHooks = [];
+        this.onNodeLeftHooks = [];
+    }
+
+    /**
+     * 注册节点加入时的钩子函数
+     * @param {function} hook - 节点加入时执行的回调函数
+     */
+    onNodeJoined(hook: (node: NodeInfoWithClient) => void | Promise<void>): void {
+        this.onNodeJoinedHooks.push(hook);
+    }
+
+    /**
+     * 注册节点离开时的钩子函数
+     * @param {function} hook - 节点离开时执行的回调函数
+     */
+    onNodeLeft(hook: (node: NodeInfoWithClient) => void | Promise<void>): void {
+        this.onNodeLeftHooks.push(hook);
+    }
+
+    /**
+     * 添加节点到集群
+     * @param {NodeInfoWithClient} node - 要添加的节点信息
+     */
+    async addNode(node: NodeInfoWithClient): Promise<void> {
+        if (!this.nodes.has(node.id)) {
+            this.nodes.set(node.id, node);
+            for (const hook of this.onNodeJoinedHooks) {
+                await hook(node);
+            }
+        }
+    }
+
+    /**
+     * 从集群中移除节点
+     * @param {string} id - 要移除的节点ID
+     */
+    async removeNode(id: string): Promise<void> {
+        const node = this.nodes.get(id);
+        if (node) {
+            this.nodes.delete(id);
+            for (const hook of this.onNodeLeftHooks) {
+                await hook(node);
+            }
+        }
+    }
+
+    /**
+     * 获取节点信息
+     * @param {string} id - 节点ID
+     * @returns {NodeInfoWithClient | undefined} 节点信息
+     */
+    getNode(id: string): NodeInfoWithClient | undefined {
+        return this.nodes.get(id);
+    }
+
+    /**
+     * 获取所有节点ID
+     * @returns {IterableIterator<string>} 节点ID迭代器
+     */
+    getNodeIds(): IterableIterator<string> {
+        return this.nodes.keys();
+    }
+
+    /**
+     * 获取所有节点
+     * @returns {Node[]} 节点列表
+     */
+    getAllNodes(): Node[] {
+        return Array.from(this.nodes.values()).map((n) => ({
+            id: n.id,
+            addr: n.addr,
+        }));
+    }
+
+    /**
+     * 检查节点是否存在
+     * @param {string} id - 节点ID
+     * @returns {boolean} 节点是否存在
+     */
+    hasNode(id: string): boolean {
+        return this.nodes.has(id);
+    }
+
+    /**
+     * 获取节点数量
+     * @returns {number} 节点数量
+     */
+    getNodeCount(): number {
+        return this.nodes.size;
+    }
+}
+
+/**
  * 积极节点类
  * 管理分布式搜索引擎集群中的单个节点
  */
@@ -134,7 +241,7 @@ class EagerNode {
     private addr: string;
     private id: string;
     private server: grpc.Server;
-    private nodes: Map<string, NodeInfoWithClient>;
+    private clusterManager: ClusterManager;
     private data: Set<string>;
 
     /**
@@ -148,8 +255,23 @@ class EagerNode {
         this.addr = addr;
         this.id = id;
         this.server = new grpc.Server();
-        this.nodes = new Map();
+        this.clusterManager = new ClusterManager();
         this.data = new Set();
+        this.setupClusterHooks();
+    }
+
+    /**
+     * 设置集群管理器的钩子函数
+     * 配置节点加入和离开时的行为
+     */
+    private setupClusterHooks(): void {
+        this.clusterManager.onNodeJoined((node) => {
+            console.log(`Joined node: ${node.id} at ${node.addr}`);
+        });
+
+        this.clusterManager.onNodeLeft((node) => {
+            console.log(`Left node: ${node.id} at ${node.addr}`);
+        });
     }
     /**
      * 获取集群节点所有已存储的数据
@@ -172,9 +294,9 @@ class EagerNode {
                 console.log(`Found data: ${result}`);
             });
             if (data.length > 0) {
-                for (const id of this.nodes.keys()) {
+                for (const id of this.clusterManager.getNodeIds()) {
                     if (id !== this.id) {
-                        const node = this.nodes.get(id);
+                        const node = this.clusterManager.getNode(id);
                         if (node) {
                             const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
                                 node.client.engine.pushData,
@@ -212,9 +334,9 @@ class EagerNode {
             }
             this.data.add(formattedLine);
             console.log(`Received input: ${formattedLine}`);
-            for (const id of this.nodes.keys()) {
+            for (const id of this.clusterManager.getNodeIds()) {
                 if (id !== this.id) {
-                    const node = this.nodes.get(id);
+                    const node = this.clusterManager.getNode(id);
                     if (node) {
                         const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
                             node.client.engine.pushData,
@@ -231,11 +353,12 @@ class EagerNode {
         });
         process.on("SIGUSR1", () => {
             console.log("=== All Nodes Information ===");
-            for (const [id, nodeInfo] of this.nodes.entries()) {
-                console.log(`Node ID: ${id}`);
-                console.log(`  Address: ${nodeInfo.addr}`);
+            const nodes = this.clusterManager.getAllNodes();
+            for (const node of nodes) {
+                console.log(`Node ID: ${node.id}`);
+                console.log(`  Address: ${node.addr}`);
             }
-            console.log(`Total nodes: ${this.nodes.size}`);
+            console.log(`Total nodes: ${this.clusterManager.getNodeCount()}`);
             console.log("=============================");
         });
         process.on("SIGUSR2", () => {
@@ -282,10 +405,7 @@ class EagerNode {
                 const node = call.request.node;
                 if (node) {
                     const { id, addr } = node;
-                    if (!this.nodes.has(id)) {
-                        this.nodes.set(id, this.nodeInfo(id, addr));
-                        console.log(`Joined node: ${id} at ${addr}`);
-                    }
+                    await this.clusterManager.addNode(this.nodeInfo(id, addr));
                 }
                 callback(null, {});
             },
@@ -299,11 +419,7 @@ class EagerNode {
             ) => {
                 const node = call.request.node;
                 if (node) {
-                    const { id, addr } = node;
-                    if (this.nodes.has(id)) {
-                        this.nodes.delete(id);
-                        console.log(`Left node: ${id} at ${addr}`);
-                    }
+                    await this.clusterManager.removeNode(node.id);
                 }
                 callback(null, {});
             },
@@ -315,11 +431,7 @@ class EagerNode {
                 _call: grpc.ServerUnaryCall<ListRequest, ListResponse>,
                 callback: grpc.sendUnaryData<ListResponse>,
             ) => {
-                const nodes = Array.from(this.nodes.values()).map((n) => ({
-                    id: n.id,
-                    addr: n.addr,
-                }));
-                callback(null, { nodes });
+                callback(null, { nodes: this.clusterManager.getAllNodes() });
             },
         } as ClusterServer);
         this.server.addService(EngineService, {
@@ -377,7 +489,7 @@ class EagerNode {
         this.addr = `${this.addr.split(":")[0]}:${port}`;
         this.setupSearchLoop();
         this.setupIoLoop();
-        this.nodes.set(this.id, {
+        await this.clusterManager.addNode({
             id: this.id,
             addr: this.addr,
             client: {
@@ -408,9 +520,9 @@ class EagerNode {
     async join(nodes: Node[]): Promise<void> {
         const localData = this.getData();
         for (const node of nodes) {
-            if (!this.nodes.has(node.id)) {
+            if (!this.clusterManager.hasNode(node.id)) {
                 const nodeInfo = this.nodeInfo(node.id, node.addr);
-                this.nodes.set(node.id, nodeInfo);
+                await this.clusterManager.addNode(nodeInfo);
                 const joinAsync = promisify<JoinRequest, JoinResponse>(nodeInfo.client.cluster.join).bind(
                     nodeInfo.client.cluster,
                 );
@@ -443,9 +555,9 @@ class EagerNode {
      * 向所有其他节点发送离开通知
      */
     async leave(): Promise<void> {
-        for (const id of this.nodes.keys()) {
+        for (const id of this.clusterManager.getNodeIds()) {
             if (id !== this.id) {
-                const node = this.nodes.get(id);
+                const node = this.clusterManager.getNode(id);
                 if (node) {
                     const leaveAsync = promisify<LeaveRequest, LeaveResponse>(node.client.cluster.leave).bind(
                         node.client.cluster,
