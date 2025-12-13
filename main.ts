@@ -166,30 +166,35 @@ class EagerNode {
     private setupEngineLoop(): void {
         const loop = async (): Promise<void> => {
             while (true) {
-                const begin = Date.now();
-                const data: string[] = [];
-                this.engine.output((result: string) => {
-                    this.data.add(result);
-                    data.push(result);
-                    console.log(`Found data: ${result}`);
-                });
-                if (data.length > 0) {
-                    for (const id of this.nodes.keys()) {
-                        if (id !== this.id) {
-                            const node = this.nodes.get(id);
-                            if (node) {
-                                const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
-                                    node.client.engine.pushData,
-                                ).bind(node.client.engine);
-                                await pushDataAsync({ data });
+                try {
+                    const begin = Date.now();
+                    const data: string[] = [];
+                    this.engine.output((result: string) => {
+                        this.data.add(result);
+                        data.push(result);
+                        console.log(`Found data: ${result}`);
+                    });
+                    if (data.length > 0) {
+                        for (const id of this.nodes.keys()) {
+                            if (id !== this.id) {
+                                const node = this.nodes.get(id);
+                                if (node) {
+                                    const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
+                                        node.client.engine.pushData,
+                                    ).bind(node.client.engine);
+                                    await pushDataAsync({ data });
+                                }
                             }
                         }
                     }
+                    const end = Date.now();
+                    const cost = end - begin;
+                    const waiting = Math.max(1000 - cost, 0);
+                    await sleep(waiting);
+                } catch (error) {
+                    console.error("Error in engine loop:", error);
+                    await sleep(1000);
                 }
-                const end = Date.now();
-                const cost = end - begin;
-                const waiting = Math.max(1000 - cost, 0);
-                await sleep(waiting);
             }
         };
         setImmediate(loop);
