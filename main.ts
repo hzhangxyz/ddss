@@ -1,76 +1,13 @@
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import * as grpc from "@grpc/grpc-js";
 import { Search as Search_, type Rule } from "atsds";
 import { parse, unparse } from "atsds-bnf";
-import {
-    type JoinRequest,
-    type JoinResponse,
-    type LeaveRequest,
-    type LeaveResponse,
-    type ListRequest,
-    type ListResponse,
-    type MetaDataRequest,
-    type MetaDataResponse,
-    type PushDataRequest,
-    type PushDataResponse,
-    type PullDataRequest,
-    type PullDataResponse,
-    type Node,
-    EngineKind,
-    ClusterClient,
-    type ClusterServer,
-    ClusterService,
-    EngineClient,
-    type EngineServer,
-    EngineService,
-} from "./ddss.js";
-
-/**
- * 节点客户端接口
- * 包含集群管理和引擎服务的客户端
- */
-interface NodeClient {
-    cluster: ClusterClient;
-    engine: EngineClient;
-}
-
-/**
- * 带客户端的节点信息
- * 存储节点ID、地址和对应的gRPC客户端
- */
-interface NodeInfoWithClient {
-    id: string;
-    addr: string;
-    client: NodeClient;
-}
-
-/**
- * 积极引擎接口
- * 定义引擎必须实现的基本操作
- */
-interface EagerEngine {
-    /**
-     * 接收数据
-     * @param {string} data - 输入数据
-     * @returns {string | null} - 如果接受返回格式化后的数据，否则返回 null
-     */
-    input(data: string): string | null;
-
-    /**
-     * 执行一轮搜索
-     * @param {function} callback - 处理结果的回调函数
-     * @returns {number} - 搜索结果数量
-     */
-    output(callback: (result: string) => void): number;
-
-    /**
-     * 获取引擎元数据
-     * @returns {Object} - 包含输入和输出模式的对象
-     */
-    meta(): { input: string[]; output: string[] };
-}
+import { type Node, ClusterClient, type EngineClient } from "./ddss.js";
+import { ClusterManager, type NodeInfoWithClient } from "./ClusterManager.js";
+import { DataManager, type EagerEngine } from "./DataManager.js";
+import { EngineScheduler } from "./EngineScheduler.js";
+import { NetworkHandler } from "./NetworkHandler.js";
 
 /**
  * 搜索引擎类
@@ -128,14 +65,13 @@ class Search extends Search_ implements EagerEngine {
 /**
  * 积极节点类
  * 管理分布式搜索引擎集群中的单个节点
+ * 使用组件化架构：ClusterManager、DataManager、EngineScheduler、NetworkHandler
  */
 class EagerNode {
-    private engine: EagerEngine;
-    private addr: string;
-    private id: string;
-    private server: grpc.Server;
-    private nodes: Map<string, NodeInfoWithClient>;
-    private data: Set<string>;
+    private clusterManager: ClusterManager;
+    private dataManager: DataManager;
+    private engineScheduler: EngineScheduler;
+    private networkHandler: NetworkHandler;
 
     /**
      * 构造函数
@@ -144,52 +80,10 @@ class EagerNode {
      * @param {string} id - 节点唯一标识符，默认随机生成
      */
     constructor(engine: EagerEngine, addr: string, id: string = randomUUID()) {
-        this.engine = engine;
-        this.addr = addr;
-        this.id = id;
-        this.server = new grpc.Server();
-        this.nodes = new Map();
-        this.data = new Set();
-    }
-    /**
-     * 获取集群节点所有已存储的数据
-     * @returns {Array<string>} - 数据数组
-     */
-    private getData(): string[] {
-        return Array.from(this.data);
-    }
-    /**
-     * 设置定时循环执行搜索任务
-     * 每秒执行一次搜索，并将新发现的数据推送到其他节点
-     */
-    private setupSearchLoop(): void {
-        const loop = async (): Promise<void> => {
-            const begin = Date.now();
-            const data: string[] = [];
-            this.engine.output((result: string) => {
-                this.data.add(result);
-                data.push(result);
-                console.log(`Found data: ${result}`);
-            });
-            if (data.length > 0) {
-                for (const id of this.nodes.keys()) {
-                    if (id !== this.id) {
-                        const node = this.nodes.get(id);
-                        if (node) {
-                            const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
-                                node.client.engine.pushData,
-                            ).bind(node.client.engine);
-                            await pushDataAsync({ data });
-                        }
-                    }
-                }
-            }
-            const end = Date.now();
-            const cost = end - begin;
-            const waiting = Math.max(1000 - cost, 0);
-            setTimeout(loop, waiting);
-        };
-        setTimeout(loop, 0);
+        this.clusterManager = new ClusterManager(id, addr);
+        this.dataManager = new DataManager(engine);
+        this.engineScheduler = new EngineScheduler(this.dataManager);
+        this.networkHandler = new NetworkHandler(this.clusterManager, this.dataManager);
     }
     /**
      * 设置IO读取循环与信号处理器
@@ -206,21 +100,15 @@ class EagerNode {
             if (trimmedLine.length === 0) {
                 return;
             }
-            const formattedLine = this.engine.input(trimmedLine);
-            if (formattedLine === null) {
-                return;
-            }
-            this.data.add(formattedLine);
-            console.log(`Received input: ${formattedLine}`);
-            for (const id of this.nodes.keys()) {
-                if (id !== this.id) {
-                    const node = this.nodes.get(id);
-                    if (node) {
-                        const pushDataAsync = promisify<PushDataRequest, PushDataResponse>(
-                            node.client.engine.pushData,
-                        ).bind(node.client.engine);
-                        await pushDataAsync({ data: [formattedLine] });
-                    }
+            if (this.dataManager.addData(trimmedLine)) {
+                const formattedLine = this.dataManager.getEngine().input(trimmedLine);
+                if (formattedLine !== null) {
+                    console.log(`Received input: ${formattedLine}`);
+                    await this.dataManager.syncDataToNodes(
+                        this.clusterManager.getNodes(),
+                        this.clusterManager.getLocalNodeId(),
+                        [formattedLine],
+                    );
                 }
             }
         });
@@ -231,16 +119,16 @@ class EagerNode {
         });
         process.on("SIGUSR1", () => {
             console.log("=== All Nodes Information ===");
-            for (const [id, nodeInfo] of this.nodes.entries()) {
+            for (const [id, nodeInfo] of this.clusterManager.getNodes().entries()) {
                 console.log(`Node ID: ${id}`);
                 console.log(`  Address: ${nodeInfo.addr}`);
             }
-            console.log(`Total nodes: ${this.nodes.size}`);
+            console.log(`Total nodes: ${this.clusterManager.getNodes().size}`);
             console.log("=============================");
         });
         process.on("SIGUSR2", () => {
             console.log("=== All Data Managed by This Node ===");
-            const data = this.getData();
+            const data = this.dataManager.getData();
             for (const index in data) {
                 console.log(`[${index}] ${data[index]}`);
             }
@@ -260,7 +148,7 @@ class EagerNode {
             addr: addr,
             client: {
                 cluster: new ClusterClient(addr, grpc.credentials.createInsecure()),
-                engine: new EngineClient(addr, grpc.credentials.createInsecure()),
+                engine: this.networkHandler.createEngineClient(addr),
             },
         };
     }
@@ -270,122 +158,21 @@ class EagerNode {
      * @returns {EagerNode} 返回当前节点实例
      */
     async listen(): Promise<EagerNode> {
-        this.server.addService(ClusterService, {
-            /**
-             * 处理节点加入请求
-             * 将请求节点加入本地节点列表
-             */
-            join: async (
-                call: grpc.ServerUnaryCall<JoinRequest, JoinResponse>,
-                callback: grpc.sendUnaryData<JoinResponse>,
-            ) => {
-                const node = call.request.node;
-                if (node) {
-                    const { id, addr } = node;
-                    if (!this.nodes.has(id)) {
-                        this.nodes.set(id, this.nodeInfo(id, addr));
-                        console.log(`Joined node: ${id} at ${addr}`);
-                    }
-                }
-                callback(null, {});
-            },
-            /**
-             * 处理节点离开请求
-             * 将请求节点从本地节点列表中移除
-             */
-            leave: async (
-                call: grpc.ServerUnaryCall<LeaveRequest, LeaveResponse>,
-                callback: grpc.sendUnaryData<LeaveResponse>,
-            ) => {
-                const node = call.request.node;
-                if (node) {
-                    const { id, addr } = node;
-                    if (this.nodes.has(id)) {
-                        this.nodes.delete(id);
-                        console.log(`Left node: ${id} at ${addr}`);
-                    }
-                }
-                callback(null, {});
-            },
-            /**
-             * 处理节点列表请求
-             * 返回当前集群中所有节点的列表
-             */
-            list: async (
-                _call: grpc.ServerUnaryCall<ListRequest, ListResponse>,
-                callback: grpc.sendUnaryData<ListResponse>,
-            ) => {
-                const nodes = Array.from(this.nodes.values()).map((n) => ({
-                    id: n.id,
-                    addr: n.addr,
-                }));
-                callback(null, { nodes });
-            },
-        } as ClusterServer);
-        this.server.addService(EngineService, {
-            /**
-             * 处理元数据查询请求
-             * 返回引擎的元数据信息
-             */
-            metaData: async (
-                _call: grpc.ServerUnaryCall<MetaDataRequest, MetaDataResponse>,
-                callback: grpc.sendUnaryData<MetaDataResponse>,
-            ) => {
-                const meta = this.engine.meta();
-                callback(null, {
-                    metadata: {
-                        id: this.id,
-                        kind: EngineKind.EAGER,
-                        input: meta.input,
-                        output: meta.output,
-                    },
-                });
-            },
-            /**
-             * 处理数据推送请求
-             * 接收其他节点推送的数据并添加到本地搜索引擎
-             */
-            pushData: async (
-                call: grpc.ServerUnaryCall<PushDataRequest, PushDataResponse>,
-                callback: grpc.sendUnaryData<PushDataResponse>,
-            ) => {
-                const data = call.request.data;
-                if (data) {
-                    for (const item of data) {
-                        const formattedItem = this.engine.input(item);
-                        if (formattedItem !== null) {
-                            this.data.add(formattedItem);
-                            console.log(`Received data: ${item}`);
-                        }
-                    }
-                }
-                callback(null, {});
-            },
-            /**
-             * 处理数据拉取请求
-             * 返回本地存储的所有数据
-             */
-            pullData: async (
-                _call: grpc.ServerUnaryCall<PullDataRequest, PullDataResponse>,
-                callback: grpc.sendUnaryData<PullDataResponse>,
-            ) => {
-                callback(null, { data: this.getData() });
-            },
-        } as EngineServer);
-        const bindAsync = promisify<string, grpc.ServerCredentials, number>(this.server.bindAsync).bind(this.server);
-        const port = await bindAsync(this.addr, grpc.ServerCredentials.createInsecure());
-        this.addr = `${this.addr.split(":")[0]}:${port}`;
-        this.setupSearchLoop();
+        this.networkHandler.registerServices();
+
+        const port = await this.networkHandler.listen(this.clusterManager.getLocalNodeAddr());
+        const addr = `${this.clusterManager.getLocalNodeAddr().split(":")[0]}:${port}`;
+        this.clusterManager.setLocalNodeAddr(addr);
+
+        this.engineScheduler.start(this.clusterManager.getNodes(), this.clusterManager.getLocalNodeId());
         this.setupIoLoop();
-        this.nodes.set(this.id, {
-            id: this.id,
-            addr: this.addr,
-            client: {
-                cluster: null as unknown as ClusterClient,
-                engine: null as unknown as EngineClient,
-            },
+
+        this.clusterManager.addNode(this.clusterManager.getLocalNodeId(), addr, {
+            cluster: null as unknown as ClusterClient,
+            engine: null as unknown as EngineClient,
         });
-        console.log(`Listening on: ${this.addr} (Node ID: ${this.id})`);
+
+        console.log(`Listening on: ${addr} (Node ID: ${this.clusterManager.getLocalNodeId()})`);
         return this;
     }
     /**
@@ -394,42 +181,29 @@ class EagerNode {
      * @returns {Promise<Node[]>} 节点列表
      */
     async list(addr: string): Promise<Node[]> {
-        const client = new ClusterClient(addr, grpc.credentials.createInsecure());
-        const listAsync = promisify<ListRequest, ListResponse>(client.list).bind(client);
-        const response = await listAsync({});
-        client.close();
-        console.log(`Listing nodes: ${response.nodes.length} nodes from ${addr}`);
-        return response.nodes;
+        return this.clusterManager.listRemoteNodes(addr);
     }
     /**
      * 加入现有集群
      * @param {Node[]} nodes - 要加入的节点列表
      */
     async join(nodes: Node[]): Promise<void> {
-        const localData = this.getData();
+        const localData = this.dataManager.getData();
         for (const node of nodes) {
-            if (!this.nodes.has(node.id)) {
+            if (!this.clusterManager.hasNode(node.id)) {
                 const nodeInfo = this.nodeInfo(node.id, node.addr);
-                this.nodes.set(node.id, nodeInfo);
-                const joinAsync = promisify<JoinRequest, JoinResponse>(nodeInfo.client.cluster.join).bind(
-                    nodeInfo.client.cluster,
-                );
-                await joinAsync({ node: { id: this.id, addr: this.addr } });
+                this.clusterManager.addNode(node.id, node.addr, nodeInfo.client);
+
+                await this.clusterManager.sendJoinRequest(nodeInfo);
+
                 if (localData.length > 0) {
-                    const pushAsync = promisify<PushDataRequest, PushDataResponse>(
-                        nodeInfo.client.engine.pushData,
-                    ).bind(nodeInfo.client.engine);
-                    await pushAsync({ data: localData });
+                    await this.dataManager.pushDataToNode(nodeInfo, localData);
                 }
-                const pullAsync = promisify<PullDataRequest, PullDataResponse>(nodeInfo.client.engine.pullData).bind(
-                    nodeInfo.client.engine,
-                );
-                const dataResponse = await pullAsync({});
-                if (dataResponse.data) {
-                    for (const item of dataResponse.data) {
-                        const formattedItem = this.engine.input(item);
-                        if (formattedItem !== null) {
-                            this.data.add(formattedItem);
+
+                const remoteData = await this.dataManager.pullDataFromNode(nodeInfo);
+                if (remoteData) {
+                    for (const item of remoteData) {
+                        if (this.dataManager.addData(item)) {
                             console.log(`Receiving data: ${item}`);
                         }
                     }
@@ -443,18 +217,10 @@ class EagerNode {
      * 向所有其他节点发送离开通知
      */
     async leave(): Promise<void> {
-        for (const id of this.nodes.keys()) {
-            if (id !== this.id) {
-                const node = this.nodes.get(id);
-                if (node) {
-                    const leaveAsync = promisify<LeaveRequest, LeaveResponse>(node.client.cluster.leave).bind(
-                        node.client.cluster,
-                    );
-                    await leaveAsync({ node: { id: this.id, addr: this.addr } });
-                    node.client.cluster.close();
-                    node.client.engine.close();
-                    console.log(`Leaving node ${node.id} at ${node.addr}`);
-                }
+        for (const [id, node] of this.clusterManager.getNodes().entries()) {
+            if (id !== this.clusterManager.getLocalNodeId()) {
+                await this.clusterManager.sendLeaveRequest(node);
+                console.log(`Leaving node ${node.id} at ${node.addr}`);
             }
         }
     }

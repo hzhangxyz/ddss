@@ -8,5 +8,5 @@
         "isolatedModules": true,
         "skipLibCheck": true
     },
-    "include": ["main.ts", "ddss.ts"]
+    "include": ["main.ts", "ddss.ts", "ClusterManager.ts", "DataManager.ts", "EngineScheduler.ts", "NetworkHandler.ts"]
 }
