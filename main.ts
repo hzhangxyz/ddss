@@ -166,8 +166,11 @@ class ClusterManager {
     async addNode(node: NodeInfoWithClient): Promise<void> {
         if (!this.nodes.has(node.id)) {
             this.nodes.set(node.id, node);
-            for (const hook of this.onNodeJoinedHooks) {
-                await hook(node);
+            const results = await Promise.allSettled(this.onNodeJoinedHooks.map((hook) => hook(node)));
+            for (const result of results) {
+                if (result.status === "rejected") {
+                    console.error(`Error in onNodeJoined hook: ${result.reason}`);
+                }
             }
         }
     }
@@ -180,8 +183,11 @@ class ClusterManager {
         const node = this.nodes.get(id);
         if (node) {
             this.nodes.delete(id);
-            for (const hook of this.onNodeLeftHooks) {
-                await hook(node);
+            const results = await Promise.allSettled(this.onNodeLeftHooks.map((hook) => hook(node)));
+            for (const result of results) {
+                if (result.status === "rejected") {
+                    console.error(`Error in onNodeLeft hook: ${result.reason}`);
+                }
             }
         }
     }
