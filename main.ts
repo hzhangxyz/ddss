@@ -117,19 +117,50 @@ class ClusterManager {
 
     /**
      * 添加节点到集群
+     * 自动创建与目标节点的客户端连接
      * @param {string} id - 节点 ID
      * @param {string} addr - 节点地址
-     * @param {NodeClient} client - 节点客户端
      */
-    addNode(id: string, addr: string, client: NodeClient): void {
-        this.nodes.set(id, { id, addr, client });
+    addNode(id: string, addr: string): void {
+        if (!this.nodes.has(id)) {
+            const client: NodeClient = {
+                cluster: new ClusterClient(addr, grpc.credentials.createInsecure()),
+                engine: new EngineClient(addr, grpc.credentials.createInsecure()),
+            };
+            this.nodes.set(id, { id, addr, client });
+        }
+    }
+
+    /**
+     * 添加本地节点（不创建客户端连接）
+     * @param {string} id - 节点 ID
+     * @param {string} addr - 节点地址
+     */
+    addLocalNode(id: string, addr: string): void {
+        this.nodes.set(id, {
+            id,
+            addr,
+            client: {
+                cluster: null as unknown as ClusterClient,
+                engine: null as unknown as EngineClient,
+            },
+        });
     }
 
     /**
      * 移除节点
+     * 自动关闭与目标节点的客户端连接
      */
     removeNode(id: string): void {
-        this.nodes.delete(id);
+        const nodeInfo = this.nodes.get(id);
+        if (nodeInfo) {
+            // Clean up clients to prevent resource leaks
+            nodeInfo.client.cluster.close();
+            if (nodeInfo.client.engine) {
+                nodeInfo.client.engine.close();
+            }
+            this.nodes.delete(id);
+        }
     }
 
     /**
@@ -163,15 +194,8 @@ class ClusterManager {
                 const node = call.request.node;
                 if (node) {
                     const { id, addr } = node;
-                    if (!this.nodes.has(id)) {
-                        // Create clients to connect back to the joining node
-                        const client: NodeClient = {
-                            cluster: new ClusterClient(addr, grpc.credentials.createInsecure()),
-                            engine: new EngineClient(addr, grpc.credentials.createInsecure()),
-                        };
-                        this.nodes.set(id, { id, addr, client });
-                        console.log(`Joined node: ${id} at ${addr}`);
-                    }
+                    this.addNode(id, addr);
+                    console.log(`Joined node: ${id} at ${addr}`);
                 }
                 callback(null, {});
             },
@@ -186,18 +210,8 @@ class ClusterManager {
                 const node = call.request.node;
                 if (node) {
                     const { id, addr } = node;
-                    if (this.nodes.has(id)) {
-                        const nodeInfo = this.nodes.get(id);
-                        if (nodeInfo) {
-                            // Clean up clients to prevent resource leaks
-                            nodeInfo.client.cluster.close();
-                            if (nodeInfo.client.engine) {
-                                nodeInfo.client.engine.close();
-                            }
-                        }
-                        this.nodes.delete(id);
-                        console.log(`Left node: ${id} at ${addr}`);
-                    }
+                    this.removeNode(id);
+                    console.log(`Left node: ${id} at ${addr}`);
                 }
                 callback(null, {});
             },
@@ -353,12 +367,16 @@ class EagerDataManager {
     }
 
     /**
-     * 同步数据到所有其他节点
+     * 推送数据到所有其他节点
      * @param {Map<string, NodeInfoWithClient>} nodes - 所有节点
      * @param {string} localNodeId - 本地节点ID
-     * @param {string[]} data - 要同步的数据
+     * @param {string[]} data - 要推送的数据
      */
-    async syncDataToNodes(nodes: Map<string, NodeInfoWithClient>, localNodeId: string, data: string[]): Promise<void> {
+    async pushDataToAllNodes(
+        nodes: Map<string, NodeInfoWithClient>,
+        localNodeId: string,
+        data: string[],
+    ): Promise<void> {
         if (data.length === 0) {
             return;
         }
@@ -416,9 +434,9 @@ class EagerEngineScheduler {
                 }
             });
 
-            // 同步新数据到其他节点
+            // 推送新数据到其他节点
             if (newData.length > 0) {
-                await this.dataManager.syncDataToNodes(nodes, localNodeId, newData);
+                await this.dataManager.pushDataToAllNodes(nodes, localNodeId, newData);
             }
 
             const end = Date.now();
@@ -645,7 +663,7 @@ class EagerNode {
             }
             const formattedLine = this.dataManager.addDataWithLog(trimmedLine, "Received input");
             if (formattedLine !== null) {
-                await this.dataManager.syncDataToNodes(
+                await this.dataManager.pushDataToAllNodes(
                     this.clusterManager.getNodes(),
                     this.clusterManager.getLocalNodeId(),
                     [formattedLine],
@@ -677,22 +695,6 @@ class EagerNode {
         });
     }
     /**
-     * 创建节点信息对象
-     * @param {string} id - 节点 ID
-     * @param {string} addr - 节点地址
-     * @returns {Object} 包含节点信息和 gRPC 客户端的对象
-     */
-    private nodeInfo(id: string, addr: string): NodeInfoWithClient {
-        return {
-            id: id,
-            addr: addr,
-            client: {
-                cluster: new ClusterClient(addr, grpc.credentials.createInsecure()),
-                engine: this.networkHandler.createEngineClient(addr),
-            },
-        };
-    }
-    /**
      * 启动节点监听服务
      * 创建 gRPC 服务器并注册集群管理和引擎服务
      * @returns {EagerNode} 返回当前节点实例
@@ -707,10 +709,7 @@ class EagerNode {
         this.engineScheduler.start(this.clusterManager.getNodes(), this.clusterManager.getLocalNodeId());
         this.setupIoLoop();
 
-        this.clusterManager.addNode(this.clusterManager.getLocalNodeId(), addr, {
-            cluster: null as unknown as ClusterClient,
-            engine: null as unknown as EngineClient,
-        });
+        this.clusterManager.addLocalNode(this.clusterManager.getLocalNodeId(), addr);
 
         console.log(`Listening on: ${addr} (Node ID: ${this.clusterManager.getLocalNodeId()})`);
         return this;
@@ -731,8 +730,11 @@ class EagerNode {
         const localData = this.dataManager.getData();
         for (const node of nodes) {
             if (!this.clusterManager.hasNode(node.id)) {
-                const nodeInfo = this.nodeInfo(node.id, node.addr);
-                this.clusterManager.addNode(node.id, node.addr, nodeInfo.client);
+                this.clusterManager.addNode(node.id, node.addr);
+                const nodeInfo = this.clusterManager.getNode(node.id);
+                if (!nodeInfo) {
+                    continue;
+                }
 
                 await this.clusterManager.sendJoinRequest(nodeInfo);
 
