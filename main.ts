@@ -130,9 +130,9 @@ class Search extends Search_ implements EagerEngine {
  * 管理分布式搜索引擎集群中的单个节点
  */
 class EagerNode {
-    private id: string;
-    private addr: string;
     private engine: EagerEngine;
+    private addr: string;
+    private id: string;
     private server: grpc.Server;
     private nodes: Map<string, NodeInfoWithClient>;
     private data: Set<string>;
