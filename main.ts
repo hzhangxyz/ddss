@@ -92,7 +92,7 @@ class DataManager {
     }
 }
 
-class EagerEngineScheduler {
+class EagerEngineManager {
     private eagerEngine: EagerEngine;
     private onSearchResults: (results: string[]) => Promise<void>;
     private searchInterval: number;
@@ -244,7 +244,7 @@ class NetworkHandler {
     private addr: string;
     private callbacks: NetworkHandlerCallbacks;
 
-    constructor(addr: string, _id: string, callbacks: NetworkHandlerCallbacks) {
+    constructor(addr: string, callbacks: NetworkHandlerCallbacks) {
         this.server = new grpc.Server();
         this.addr = addr;
         this.callbacks = callbacks;
@@ -359,17 +359,16 @@ class EagerNode {
     private id: string;
     private addr: string;
     private clusterManager: ClusterManager;
-    private engineScheduler: EagerEngineScheduler;
+    private engineManager: EagerEngineManager;
     private networkHandler: NetworkHandler;
     private stdinInterface: ReturnType<typeof createInterface> | null = null;
 
     constructor(engine: EagerEngine, addr: string, id: string = randomUUID()) {
         this.id = id;
         this.addr = addr;
-
         this.clusterManager = new ClusterManager(id);
-        this.engineScheduler = new EagerEngineScheduler(engine, this.handleSearchResults.bind(this));
-        this.networkHandler = new NetworkHandler(addr, id, {
+        this.engineManager = new EagerEngineManager(engine, this.handleSearchResults.bind(this));
+        this.networkHandler = new NetworkHandler(addr, {
             onJoin: this.handleJoinRequest.bind(this),
             onLeave: this.handleLeaveRequest.bind(this),
             onList: this.handleListRequest.bind(this),
@@ -383,41 +382,33 @@ class EagerNode {
         const actualAddr = await this.networkHandler.start();
         this.addr = actualAddr;
         this.clusterManager.addNode(this.id, this.addr);
-        this.engineScheduler.start();
+        this.engineManager.start();
         this.setupIoHandling();
-
         console.log(`Node started: ${this.id} at ${this.addr}`);
     }
 
     async stop(): Promise<void> {
-        this.engineScheduler.stop();
-        await this.networkHandler.stop();
-
+        await this.leaveCluster();
         if (this.stdinInterface) {
             this.stdinInterface.close();
         }
-
-        await this.leaveCluster();
+        this.engineManager.stop();
+        await this.networkHandler.stop();
         console.log(`Node stopped: ${this.id}`);
     }
 
     async joinCluster(joinAddr: string): Promise<void> {
         const client = this.clusterManager.createNodeClient(joinAddr);
-
         const nodes = await this.networkHandler.callList(client);
         const currentNode = { id: this.id, addr: this.addr };
-
         for (const node of nodes) {
             if (node.id !== this.id) {
                 const { client: nodeClient } = this.clusterManager.addNode(node.id, node.addr);
                 await this.networkHandler.callJoin(currentNode, nodeClient);
-
                 await this.syncDataWithNode(nodeClient);
-
                 console.log(`Joining node: ${node.id} at ${node.addr}`);
             }
         }
-
         client.cluster.close();
         client.engine.close();
     }
@@ -425,7 +416,6 @@ class EagerNode {
     private async leaveCluster(): Promise<void> {
         const currentNode = { id: this.id, addr: this.addr };
         const otherNodes = this.clusterManager.getAllOtherNodes();
-
         for (const node of otherNodes) {
             await this.networkHandler.callLeave(currentNode, node.client);
             this.clusterManager.removeNode(node.id);
@@ -451,7 +441,7 @@ class EagerNode {
     }
 
     private async handlePushDataRequest(data: string[]): Promise<string[]> {
-        const formatted = this.engineScheduler.addDataBatch(data);
+        const formatted = this.engineManager.addDataBatch(data);
         for (const item of formatted) {
             console.log(`Data received: ${item}`);
         }
@@ -464,7 +454,7 @@ class EagerNode {
         input: string[];
         output: string[];
     }> {
-        const meta = this.engineScheduler.getMetaData();
+        const meta = this.engineManager.getMetaData();
         return {
             id: this.id,
             kind: EngineKind.EAGER,
@@ -474,12 +464,11 @@ class EagerNode {
     }
 
     private async handlePullDataRequest(): Promise<string[]> {
-        return this.engineScheduler.getData();
+        return this.engineManager.getData();
     }
 
     private async handleSearchResults(results: string[]): Promise<void> {
         if (results.length === 0) return;
-
         for (const result of results) {
             console.log(`Data found: ${result}`);
         }
@@ -490,14 +479,13 @@ class EagerNode {
     }
 
     private async syncDataWithNode(client: NodeClient): Promise<void> {
-        const localData = this.engineScheduler.getData();
+        const localData = this.engineManager.getData();
         if (localData.length > 0) {
             await this.networkHandler.callPushData(localData, client);
         }
-
         const remoteData = await this.networkHandler.callPullData(client);
         if (remoteData.length > 0) {
-            const formatted = this.engineScheduler.addDataBatch(remoteData);
+            const formatted = this.engineManager.addDataBatch(remoteData);
             for (const item of formatted) {
                 console.log(`Pulling data: ${item}`);
             }
@@ -510,12 +498,11 @@ class EagerNode {
             output: process.stdout,
             terminal: false,
         });
-
         this.stdinInterface.on("line", async (line: string) => {
             const trimmed = line.trim();
             if (trimmed.length === 0) return;
 
-            const formatted = this.engineScheduler.addData(trimmed);
+            const formatted = this.engineManager.addData(trimmed);
             if (formatted) {
                 console.log(`Data read: ${formatted}`);
 
@@ -525,35 +512,28 @@ class EagerNode {
                 }
             }
         });
-
         process.on("SIGINT", async () => {
             console.log("\nShutting down...");
             await this.stop();
             process.exit(0);
         });
-
         process.on("SIGUSR1", () => {
             console.log("=== Cluster Information ===");
             console.log(`Current Node: ${this.id} at ${this.addr}`);
             console.log("\nConnected Nodes:");
-
             const nodes = this.clusterManager.getAllOtherNodes();
             nodes.forEach((node, index) => {
                 console.log(`  ${index + 1}. ${node.id} at ${node.addr}`);
             });
-
             console.log(`Total nodes: ${nodes.length + 1}`);
             console.log("===========================");
         });
-
         process.on("SIGUSR2", () => {
             console.log("=== Data Information ===");
-            const data = this.engineScheduler.getData();
-
+            const data = this.engineManager.getData();
             data.forEach((item, index) => {
                 console.log(`  ${index + 1}. ${item}`);
             });
-
             console.log(`Total data items: ${data.length}`);
             console.log("========================");
         });
@@ -577,13 +557,10 @@ async function main() {
         console.error("Usage: main <bind_addr> [<join_addr>]");
         process.exit(1);
     }
-
     const listenAddr = addAddressPrefixForPort(process.argv[2], "0.0.0.0");
     const engine = new AtsdsSearchEngine();
     const node = new EagerNode(engine, listenAddr);
-
     await node.start();
-
     if (process.argv.length === 4) {
         const joinAddr = addAddressPrefixForPort(process.argv[3], "127.0.0.1");
         console.log(`Joining cluster at ${joinAddr}...`);
@@ -591,7 +568,6 @@ async function main() {
     } else {
         console.log("Starting as first node in new cluster...");
     }
-
     process.stdin.resume();
 }
 
