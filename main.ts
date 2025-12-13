@@ -559,15 +559,6 @@ class EagerNetworkHandler {
     getServer(): grpc.Server {
         return this.server;
     }
-
-    /**
-     * 创建引擎客户端
-     * @param {string} addr - 目标地址
-     * @returns {EngineClient} 引擎客户端实例
-     */
-    createEngineClient(addr: string): EngineClient {
-        return new EngineClient(addr, grpc.credentials.createInsecure());
-    }
 }
 
 /**
