@@ -198,13 +198,13 @@ class ClusterNode {
             console.log("=============================");
         });
         process.on("SIGUSR2", () => {
-            console.log("=== All Data Managed by ClusterNode ===");
+            console.log("=== All Data Managed by This Node ===");
             const data = this.getData();
             for (const index in data) {
                 console.log(`[${index}] ${data[index]}`);
             }
             console.log(`Total data items: ${data.length}`);
-            console.log("========================================");
+            console.log("=====================================");
         });
     }
     /**
@@ -305,10 +305,8 @@ class ClusterNode {
             ) => {
                 const data = call.request.data!;
                 for (const item of data) {
-                    const formattedItem = this.engine.input(item);
-                    if (formattedItem !== null) {
-                        this.data.add(formattedItem);
-                    }
+                    const formattedItem = this.engine.input(item)!;
+                    this.data.add(formattedItem);
                     console.log(`Received data: ${item}`);
                 }
                 callback(null, {});
@@ -379,10 +377,8 @@ class ClusterNode {
                 const dataResponse = await pullAsync({});
                 if (dataResponse.data) {
                     for (const item of dataResponse.data) {
-                        const formattedItem = this.engine.input(item);
-                        if (formattedItem !== null) {
-                            this.data.add(formattedItem);
-                        }
+                        const formattedItem = this.engine.input(item)!;
+                        this.data.add(formattedItem);
                         console.log(`Receiving data: ${item}`);
                     }
                 }
