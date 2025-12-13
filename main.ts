@@ -85,6 +85,17 @@ class Search extends Search_ {
             return false;
         });
     }
+
+    /**
+     * 获取搜索引擎的元数据
+     * @returns {Object} - 包含 input 和 output 字符串数组的对象
+     */
+    meta(): { input: string[]; output: string[] } {
+        return {
+            input: ["`x"],
+            output: ["`x"],
+        };
+    }
 }
 
 /**
@@ -286,12 +297,13 @@ class ClusterNode {
                 _call: grpc.ServerUnaryCall<MetaDataRequest, MetaDataResponse>,
                 callback: grpc.sendUnaryData<MetaDataResponse>,
             ) => {
+                const meta = this.engine.meta();
                 callback(null, {
                     metadata: {
                         id: this.id,
                         kind: EngineKind.EAGER,
-                        input: ["`x"],
-                        output: ["`x"],
+                        input: meta.input,
+                        output: meta.output,
                     },
                 });
             },
