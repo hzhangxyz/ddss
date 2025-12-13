@@ -404,27 +404,22 @@ class EagerNode {
     async joinCluster(joinAddr: string): Promise<void> {
         const client = this.clusterManager.createNodeClient(joinAddr);
 
-        try {
-            const nodes = await this.networkHandler.callList(client);
-            const currentNode = { id: this.id, addr: this.addr };
+        const nodes = await this.networkHandler.callList(client);
+        const currentNode = { id: this.id, addr: this.addr };
 
-            for (const node of nodes) {
-                if (node.id !== this.id) {
-                    const { client: nodeClient } = this.clusterManager.addNode(node.id, node.addr);
-                    await this.networkHandler.callJoin(currentNode, nodeClient);
+        for (const node of nodes) {
+            if (node.id !== this.id) {
+                const { client: nodeClient } = this.clusterManager.addNode(node.id, node.addr);
+                await this.networkHandler.callJoin(currentNode, nodeClient);
 
-                    await this.syncDataWithNode(nodeClient);
+                await this.syncDataWithNode(nodeClient);
 
-                    console.log(`Joining node: ${node.id} at ${node.addr}`);
-                }
+                console.log(`Joining node: ${node.id} at ${node.addr}`);
             }
-
-            client.cluster.close();
-            client.engine.close();
-        } catch (error) {
-            console.error(`Failed to join cluster at ${joinAddr}:`, error);
-            throw error;
         }
+
+        client.cluster.close();
+        client.engine.close();
     }
 
     private async leaveCluster(): Promise<void> {
@@ -432,13 +427,9 @@ class EagerNode {
         const otherNodes = this.clusterManager.getAllOtherNodes();
 
         for (const node of otherNodes) {
-            try {
-                await this.networkHandler.callLeave(currentNode, node.client);
-                this.clusterManager.removeNode(node.id);
-                console.log(`Leaving node: ${node.id}`);
-            } catch (error) {
-                console.error(`Failed to leave node ${node.id}:`, error);
-            }
+            await this.networkHandler.callLeave(currentNode, node.client);
+            this.clusterManager.removeNode(node.id);
+            console.log(`Leaving node: ${node.id}`);
         }
     }
 
@@ -499,28 +490,20 @@ class EagerNode {
         }
         const otherNodes = this.clusterManager.getAllOtherNodes();
         for (const node of otherNodes) {
-            try {
-                await this.networkHandler.callPushData(results, node.client);
-            } catch (_error) {
-                // Silent failure when pushing data to other nodes
-            }
+            await this.networkHandler.callPushData(results, node.client);
         }
     }
 
     private async syncDataWithNode(client: NodeClient): Promise<void> {
-        try {
-            const localData = this.engineScheduler.getData();
-            if (localData.length > 0) {
-                await this.networkHandler.callPushData(localData, client);
-            }
+        const localData = this.engineScheduler.getData();
+        if (localData.length > 0) {
+            await this.networkHandler.callPushData(localData, client);
+        }
 
-            const remoteData = await this.networkHandler.callPullData(client);
-            if (remoteData.length > 0) {
-                this.engineScheduler.addDataBatch(remoteData);
-                console.log(`Synced ${remoteData.length} data items from remote`);
-            }
-        } catch (_error) {
-            // Silent failure when syncing data
+        const remoteData = await this.networkHandler.callPullData(client);
+        if (remoteData.length > 0) {
+            this.engineScheduler.addDataBatch(remoteData);
+            console.log(`Synced ${remoteData.length} data items from remote`);
         }
     }
 
@@ -541,11 +524,7 @@ class EagerNode {
 
                 const otherNodes = this.clusterManager.getAllOtherNodes();
                 for (const node of otherNodes) {
-                    try {
-                        await this.networkHandler.callPushData([formatted], node.client);
-                    } catch (_error) {
-                        // Silent failure when pushing data to other nodes
-                    }
+                    await this.networkHandler.callPushData([formatted], node.client);
                 }
             }
         });
@@ -606,23 +585,17 @@ async function main() {
     const engine = new AtsdsSearchEngine();
     const node = new EagerNode(engine, listenAddr);
 
-    try {
-        await node.start();
+    await node.start();
 
-        if (process.argv.length === 4) {
-            const joinAddr = addAddressPrefixForPort(process.argv[3], "127.0.0.1");
-            console.log(`Joining cluster at ${joinAddr}...`);
-            await node.joinCluster(joinAddr);
-        } else {
-            console.log("Starting as first node in new cluster...");
-        }
-
-        process.stdin.resume();
-    } catch (error) {
-        console.error("Failed to start node:", error);
-        await node.stop();
-        process.exit(1);
+    if (process.argv.length === 4) {
+        const joinAddr = addAddressPrefixForPort(process.argv[3], "127.0.0.1");
+        console.log(`Joining cluster at ${joinAddr}...`);
+        await node.joinCluster(joinAddr);
+    } else {
+        console.log("Starting as first node in new cluster...");
     }
+
+    process.stdin.resume();
 }
 
 if (import.meta.main) {
