@@ -115,7 +115,7 @@ class ClusterNode {
         this.data = new Set();
     }
     /**
-     * 获取所有已存储的数据
+     * 获取集群节点所有已存储的数据
      * @returns {Array<string>} - 数据数组
      */
     private getData(): string[] {
@@ -198,13 +198,13 @@ class ClusterNode {
             console.log("=============================");
         });
         process.on("SIGUSR2", () => {
-            console.log("=== All Data Managed by Search ===");
+            console.log("=== All Data Managed by ClusterNode ===");
             const data = this.getData();
             for (const index in data) {
                 console.log(`[${index}] ${data[index]}`);
             }
             console.log(`Total data items: ${data.length}`);
-            console.log("==================================");
+            console.log("========================================");
         });
     }
     /**
