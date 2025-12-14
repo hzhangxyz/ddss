@@ -98,7 +98,7 @@ class EagerEngineManager {
     private searchInterval: number;
     private dataManager: DataManager;
     private isRunning: boolean;
-    private lastSearchTime: number;
+    private resolve: () => void;
 
     constructor(
         eagerEngine: EagerEngine,
@@ -110,22 +110,26 @@ class EagerEngineManager {
         this.searchInterval = searchInterval;
         this.dataManager = new DataManager();
         this.isRunning = false;
-        this.lastSearchTime = Date.now();
+        this.resolve = () => {};
     }
 
     start(): void {
         if (this.isRunning) return;
         this.isRunning = true;
-        this.scheduleNextSearch();
+        this.searchLoop();
     }
 
     stop(): void {
         this.isRunning = false;
     }
 
-    addData(input: string): string | null {
+    addData(input: string, resolve: boolean = true): string | null {
         const formatted = this.eagerEngine.input(input);
         if (formatted && this.dataManager.addData(formatted)) {
+            if (resolve) {
+                this.resolve();
+                this.resolve = () => {};
+            }
             return formatted;
         }
         return null;
@@ -134,11 +138,13 @@ class EagerEngineManager {
     addDataBatch(data: string[]): string[] {
         const added: string[] = [];
         for (const item of data) {
-            const formatted = this.addData(item);
+            const formatted = this.addData(item, false);
             if (formatted) {
                 added.push(formatted);
             }
         }
+        this.resolve();
+        this.resolve = () => {};
         return added;
     }
 
@@ -150,30 +156,26 @@ class EagerEngineManager {
         return this.dataManager.getData();
     }
 
-    private scheduleNextSearch(): void {
-        const now = Date.now();
-        const elapsed = now - this.lastSearchTime;
-        const delay = Math.max(this.searchInterval - elapsed, 0);
-
-        setTimeout(async () => {
-            if (!this.isRunning) return;
-            this.lastSearchTime = Date.now();
-            await this.performSearch();
-            this.scheduleNextSearch();
-        }, delay);
-    }
-
-    private async performSearch(): Promise<string[]> {
-        const results: string[] = [];
-        this.eagerEngine.output((result: string) => {
-            if (this.dataManager.addData(result)) {
-                results.push(result);
+    private async searchLoop(): Promise<void> {
+        while (this.isRunning) {
+            const begin: number = Date.now();
+            const results: string[] = [];
+            this.eagerEngine.output((result: string) => {
+                if (this.dataManager.addData(result)) {
+                    results.push(result);
+                }
+            });
+            if (results.length > 0) {
+                await this.onSearchResults(results);
             }
-        });
-        if (results.length > 0) {
-            await this.onSearchResults(results);
+            const end: number = Date.now();
+            const elapsed: number = end - begin;
+            const delay: number = Math.max(this.searchInterval - elapsed, 0);
+            await new Promise<void>((resolve) => {
+                this.resolve = resolve;
+                setTimeout(resolve, delay);
+            });
         }
-        return results;
     }
 }
 
