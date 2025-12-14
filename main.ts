@@ -171,10 +171,12 @@ class EagerEngineManager {
             const end: number = Date.now();
             const elapsed: number = end - begin;
             const delay: number = Math.max(this.searchInterval - elapsed, 0);
-            await new Promise<void>((resolve) => {
-                this.resolve = resolve;
-                setTimeout(resolve, delay);
-            });
+            if (results.length === 0) {
+                await new Promise<void>((resolve) => {
+                    this.resolve = resolve;
+                    setTimeout(resolve, delay);
+                });
+            }
         }
     }
 }
