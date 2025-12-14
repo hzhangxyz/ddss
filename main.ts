@@ -182,27 +182,27 @@ class EagerEngineManager {
 class ClusterManager {
     private nodes: Map<string, NodeInfo>;
     private id: string;
+    private addr: string;
 
-    constructor(id: string) {
+    constructor(id: string, addr: string) {
         this.nodes = new Map();
         this.id = id;
+        this.addr = addr;
     }
 
     getAllNodes(): NodeInfo[] {
         return Array.from(this.nodes.values());
     }
 
-    getAllOtherNodes(): NodeInfo[] {
-        return this.getAllNodes().filter((node) => node.id !== this.id);
-    }
-
     getAllNodeInfo(): Node[] {
-        return this.getAllNodes().map((node) => ({ id: node.id, addr: node.addr }));
+        return this.getAllNodes()
+            .map((node) => ({ id: node.id, addr: node.addr }))
+            .concat([{ id: this.id, addr: this.addr }]);
     }
 
-    addNode(id: string, addr: string): NodeInfo {
+    addNode(id: string, addr: string): NodeInfo | null {
         if (this.hasNode(id)) {
-            return this.nodes.get(id)!;
+            return null;
         }
         const client = this.createNodeClient(addr);
         const nodeInfo: NodeInfo = { id, addr, client };
@@ -229,6 +229,10 @@ class ClusterManager {
             cluster: new ClusterClient(addr, grpc.credentials.createInsecure()),
             engine: new EngineClient(addr, grpc.credentials.createInsecure()),
         };
+    }
+
+    updateAddr(addr: string): void {
+        this.addr = addr;
     }
 }
 
@@ -287,10 +291,18 @@ class NetworkHandler {
         await pushAsync({ data });
     }
 
+    async callMetaData(
+        client: NodeClient,
+    ): Promise<{ id: string; kind: EngineKind; input: string[]; output: string[] }> {
+        const metaAsync = promisify<MetaDataRequest, MetaDataResponse>(client.engine.metaData).bind(client.engine);
+        const response = await metaAsync({});
+        return response.metadata!;
+    }
+
     async callPullData(client: NodeClient): Promise<string[]> {
         const pullAsync = promisify<PullDataRequest, PullDataResponse>(client.engine.pullData).bind(client.engine);
         const response = await pullAsync({});
-        return response.data || [];
+        return response.data;
     }
 
     private setupServices(): void {
@@ -299,10 +311,8 @@ class NetworkHandler {
                 call: grpc.ServerUnaryCall<JoinRequest, JoinResponse>,
                 callback: grpc.sendUnaryData<JoinResponse>,
             ) => {
-                const node = call.request.node;
-                if (node) {
-                    await this.callbacks.onJoin(node);
-                }
+                const node = call.request.node!;
+                await this.callbacks.onJoin(node);
                 callback(null, {});
             },
 
@@ -310,10 +320,8 @@ class NetworkHandler {
                 call: grpc.ServerUnaryCall<LeaveRequest, LeaveResponse>,
                 callback: grpc.sendUnaryData<LeaveResponse>,
             ) => {
-                const node = call.request.node;
-                if (node) {
-                    await this.callbacks.onLeave(node);
-                }
+                const node = call.request.node!;
+                await this.callbacks.onLeave(node);
                 callback(null, {});
             },
 
@@ -327,23 +335,21 @@ class NetworkHandler {
         } as ClusterServer);
 
         this.server.addService(EngineService, {
+            pushData: async (
+                call: grpc.ServerUnaryCall<PushDataRequest, PushDataResponse>,
+                callback: grpc.sendUnaryData<PushDataResponse>,
+            ) => {
+                const data = call.request.data;
+                await this.callbacks.onPushData(data);
+                callback(null, {});
+            },
+
             metaData: async (
                 _call: grpc.ServerUnaryCall<MetaDataRequest, MetaDataResponse>,
                 callback: grpc.sendUnaryData<MetaDataResponse>,
             ) => {
                 const metadata = await this.callbacks.onMetaData();
                 callback(null, { metadata });
-            },
-
-            pushData: async (
-                call: grpc.ServerUnaryCall<PushDataRequest, PushDataResponse>,
-                callback: grpc.sendUnaryData<PushDataResponse>,
-            ) => {
-                const data = call.request.data;
-                if (data) {
-                    await this.callbacks.onPushData(data);
-                }
-                callback(null, {});
             },
 
             pullData: async (
@@ -368,7 +374,7 @@ class EagerNode {
     constructor(engine: EagerEngine, addr: string, id: string = randomUUID()) {
         this.id = id;
         this.addr = addr;
-        this.clusterManager = new ClusterManager(id);
+        this.clusterManager = new ClusterManager(id, addr);
         this.engineManager = new EagerEngineManager(engine, this.handleSearchResults.bind(this));
         this.networkHandler = new NetworkHandler(addr, {
             onJoin: this.handleJoinRequest.bind(this),
@@ -383,7 +389,7 @@ class EagerNode {
     async start(): Promise<void> {
         const actualAddr = await this.networkHandler.start();
         this.addr = actualAddr;
-        this.clusterManager.addNode(this.id, this.addr);
+        this.clusterManager.updateAddr(actualAddr);
         this.engineManager.start();
         this.setupIoHandling();
         console.log(`Node started: ${this.id} at ${this.addr}`);
@@ -402,12 +408,14 @@ class EagerNode {
     async joinCluster(joinAddr: string): Promise<void> {
         const client = this.clusterManager.createNodeClient(joinAddr);
         const nodes = await this.networkHandler.callList(client);
-        const currentNode = { id: this.id, addr: this.addr };
+        const localNode = { id: this.id, addr: this.addr };
+        const localData = this.engineManager.getData();
         for (const node of nodes) {
             if (node.id !== this.id) {
-                const { client: nodeClient } = this.clusterManager.addNode(node.id, node.addr);
-                await this.networkHandler.callJoin(currentNode, nodeClient);
-                await this.syncDataWithNode(nodeClient);
+                const nodeInfo = this.clusterManager.addNode(node.id, node.addr);
+                if (!nodeInfo) continue;
+                await this.networkHandler.callJoin(localNode, nodeInfo.client);
+                await this.syncDataWithNode(localData, nodeInfo.client);
                 console.log(`Joining node: ${node.id} at ${node.addr}`);
             }
         }
@@ -415,11 +423,11 @@ class EagerNode {
         client.engine.close();
     }
 
-    private async leaveCluster(): Promise<void> {
-        const currentNode = { id: this.id, addr: this.addr };
-        const otherNodes = this.clusterManager.getAllOtherNodes();
+    async leaveCluster(): Promise<void> {
+        const localNode = { id: this.id, addr: this.addr };
+        const otherNodes = this.clusterManager.getAllNodes();
         for (const node of otherNodes) {
-            await this.networkHandler.callLeave(currentNode, node.client);
+            await this.networkHandler.callLeave(localNode, node.client);
             this.clusterManager.removeNode(node.id);
             console.log(`Leaving node: ${node.id}`);
         }
@@ -433,7 +441,8 @@ class EagerNode {
     }
 
     private async handleLeaveRequest(node: Node): Promise<void> {
-        if (this.clusterManager.removeNode(node.id)) {
+        if (this.clusterManager.hasNode(node.id)) {
+            this.clusterManager.removeNode(node.id);
             console.log(`Node left: ${node.id} at ${node.addr}`);
         }
     }
@@ -474,14 +483,13 @@ class EagerNode {
         for (const result of results) {
             console.log(`Data found: ${result}`);
         }
-        const otherNodes = this.clusterManager.getAllOtherNodes();
+        const otherNodes = this.clusterManager.getAllNodes();
         for (const node of otherNodes) {
             await this.networkHandler.callPushData(results, node.client);
         }
     }
 
-    private async syncDataWithNode(client: NodeClient): Promise<void> {
-        const localData = this.engineManager.getData();
+    private async syncDataWithNode(localData: string[], client: NodeClient): Promise<void> {
         if (localData.length > 0) {
             await this.networkHandler.callPushData(localData, client);
         }
@@ -503,27 +511,25 @@ class EagerNode {
         this.stdinInterface.on("line", async (line: string) => {
             const trimmed = line.trim();
             if (trimmed.length === 0) return;
-
             const formatted = this.engineManager.addData(trimmed);
             if (formatted) {
                 console.log(`Data read: ${formatted}`);
-
-                const otherNodes = this.clusterManager.getAllOtherNodes();
+                const otherNodes = this.clusterManager.getAllNodes();
                 for (const node of otherNodes) {
                     await this.networkHandler.callPushData([formatted], node.client);
                 }
             }
         });
         process.on("SIGINT", async () => {
-            console.log("\nShutting down...");
+            console.log("Shutting down...");
             await this.stop();
             process.exit(0);
         });
         process.on("SIGUSR1", () => {
             console.log("=== Cluster Information ===");
             console.log(`Current Node: ${this.id} at ${this.addr}`);
-            console.log("\nConnected Nodes:");
-            const nodes = this.clusterManager.getAllOtherNodes();
+            console.log("Connected Nodes:");
+            const nodes = this.clusterManager.getAllNodes();
             nodes.forEach((node, index) => {
                 console.log(`  ${index + 1}. ${node.id} at ${node.addr}`);
             });
@@ -542,13 +548,8 @@ class EagerNode {
     }
 }
 
-function isIntegerString(str: string): boolean {
-    if (typeof str !== "string") return false;
-    return /^\d+$/.test(str);
-}
-
 function addAddressPrefixForPort(addrOrPort: string, ip: string): string {
-    if (isIntegerString(addrOrPort)) {
+    if (/^\d+$/.test(addrOrPort)) {
         return `${ip}:${addrOrPort}`;
     }
     return addrOrPort;
